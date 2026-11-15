@@ -70,22 +70,22 @@ impl Scheduler {
     /// What the caller should do at `now`.
     #[must_use]
     pub fn plan(&self, now: Instant, budget: &Budget) -> Plan {
-        let gap_elapsed = attempt_gap_elapsed(now, budget.last_attempt);
-        let timeline_stale = is_stale(now, budget.last_success, TIMELINE_STALE);
-        let feed_stale = is_stale(now, budget.last_success, FEED_STALE);
-
-        // Reported even while the gap suppresses the flags: the caller still
+        // Reported even while the cooldown suppresses the flags: the caller still
         // needs a wake-up time, and the backoff is a property of the failures,
         // not of whether this particular instant is allowed to act.
         let retry_in = next_attempt_in(RETRY_BASE, RETRY_CAP, budget.failures);
+        let ready = attempt_ready(now, budget.last_attempt, retry_in);
+        let timeline_stale = is_stale(now, budget.last_timeline_success, TIMELINE_STALE);
+        let feed_stale = is_stale(now, budget.last_feed_success, FEED_STALE);
+
         let reconnect_in = match budget.stream {
             StreamPhase::Connected => None,
             StreamPhase::Idle => next_attempt_in(RECONNECT_BASE, RECONNECT_CAP, budget.failures),
         };
 
         Plan {
-            load_timeline: timeline_stale && gap_elapsed,
-            refresh_feed: feed_stale && gap_elapsed,
+            load_timeline: timeline_stale && ready,
+            refresh_feed: feed_stale && ready,
             retry_in,
             reconnect_in,
         }
@@ -99,11 +99,14 @@ impl Scheduler {
 /// means the state machine can snapshot it without borrowing its own state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Budget {
-    /// When a remote read last succeeded, if ever. `None` means nothing has
-    /// loaded yet, which every staleness rule treats as stale.
-    pub last_success: Option<Instant>,
-    /// When a remote read was last attempted, success or failure. Used only to
-    /// space attempts out; `None` means no attempt has been made.
+    /// When a remote timeline read last succeeded, if ever. `None` means
+    /// nothing has loaded yet, which every staleness rule treats as stale.
+    pub last_timeline_success: Option<Instant>,
+    /// When a remote feed read last succeeded, if ever. `None` means nothing
+    /// has loaded yet, which every staleness rule treats as stale.
+    pub last_feed_success: Option<Instant>,
+    /// When a remote read was last attempted, success or failure. Used to space
+    /// attempts out; `None` means no attempt has been made.
     pub last_attempt: Option<Instant>,
     /// Consecutive failures since the last success. Reset it to zero on
     /// success, or the delays stay long after the service recovers.
@@ -131,11 +134,12 @@ pub enum StreamPhase {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Plan {
     /// Load one more timeline page: the last successful read is missing or older
-    /// than [`TIMELINE_STALE`], and no attempt happened within
-    /// [`MIN_ATTEMPT_GAP`].
+    /// than [`TIMELINE_STALE`], and both [`MIN_ATTEMPT_GAP`] and any active
+    /// retry backoff have elapsed since the last attempt.
     pub load_timeline: bool,
     /// Refresh the feed: the last successful read is missing or older than
-    /// [`FEED_STALE`], and no attempt happened within [`MIN_ATTEMPT_GAP`].
+    /// [`FEED_STALE`], and both [`MIN_ATTEMPT_GAP`] and any active retry
+    /// backoff have elapsed since the last attempt.
     pub refresh_feed: bool,
     /// Delay before the next attempt after consecutive failures; `None` when
     /// the last cycle did not fail.
@@ -156,16 +160,18 @@ fn is_stale(now: Instant, last_success: Option<Instant>, threshold: Duration) ->
         .is_none_or(|age| age >= threshold)
 }
 
-/// Whether [`MIN_ATTEMPT_GAP`] has passed since `last_attempt`.
+/// Whether the cooldown since `last_attempt` (`MIN_ATTEMPT_GAP`, and `retry_in`
+/// when failures are active) has passed.
 ///
 /// An attempt timestamp in the future counts as *not* elapsed, so an unreadable
 /// clock fails safe towards "wait" instead of towards a request storm.
-fn attempt_gap_elapsed(now: Instant, last_attempt: Option<Instant>) -> bool {
+fn attempt_ready(now: Instant, last_attempt: Option<Instant>, retry_in: Option<Duration>) -> bool {
+    let required = retry_in.map_or(MIN_ATTEMPT_GAP, |retry| retry.max(MIN_ATTEMPT_GAP));
     let Some(at) = last_attempt else {
         return true;
     };
     now.checked_duration_since(at)
-        .is_some_and(|age| age >= MIN_ATTEMPT_GAP)
+        .is_some_and(|age| age >= required)
 }
 
 /// The delay before the next attempt, or `None` when nothing has failed yet.

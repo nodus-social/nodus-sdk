@@ -82,15 +82,21 @@ fn a_failure_keeps_the_success_stamp_so_the_data_still_looks_old() {
     driver.record_failure();
 
     assert_eq!(
-        driver.budget().last_success,
+        driver.budget().last_timeline_success,
         Some(now),
         "a failed refresh does not make the last good read newer"
     );
     assert!(
-        driver
+        !driver
             .plan(now + TIMELINE_STALE + Duration::from_secs(1))
             .load_timeline,
-        "the timeline is still stale once the gap has passed after a failed refresh"
+        "one second is inside the 4s retry backoff after one failure"
+    );
+    assert!(
+        driver
+            .plan(now + TIMELINE_STALE + RETRY_BASE * 2)
+            .load_timeline,
+        "the timeline is still stale once the retry backoff has passed after a failed refresh"
     );
 }
 
@@ -168,10 +174,48 @@ fn the_default_budget_is_the_empty_one() {
     assert_eq!(
         driver.budget(),
         Budget {
-            last_success: None,
+            last_timeline_success: None,
+            last_feed_success: None,
             last_attempt: None,
             failures: 0,
             stream: StreamPhase::Idle,
         }
     );
+}
+
+#[test]
+fn timeline_only_success_does_not_reset_feed_staleness() {
+    let now = start();
+    let mut driver = Driver::new();
+    driver.record_success(now);
+
+    driver.record_timeline_success(now + TIMELINE_STALE);
+
+    assert_eq!(
+        driver.budget().last_timeline_success,
+        Some(now + TIMELINE_STALE)
+    );
+    assert_eq!(driver.budget().last_feed_success, Some(now));
+    assert!(
+        driver.plan(now + crate::scheduler::FEED_STALE).refresh_feed,
+        "feed must still go stale at FEED_STALE after a timeline-only refresh"
+    );
+}
+
+#[test]
+fn partial_failure_preserves_failure_backoff_while_advancing_succeeded_read() {
+    let now = start();
+    let mut driver = Driver::new();
+    driver.record_success(now);
+    driver.record_attempt(now + TIMELINE_STALE);
+    driver.record_failure();
+    assert_eq!(driver.budget().failures, 1);
+
+    let later = now + crate::scheduler::FEED_STALE;
+    driver.record_attempt(later);
+    driver.record_cycle(later, true, false, true);
+
+    assert_eq!(driver.budget().last_timeline_success, Some(later));
+    assert_eq!(driver.budget().last_feed_success, Some(now));
+    assert_eq!(driver.budget().failures, 2);
 }
