@@ -20,6 +20,7 @@ native = ["dep:reqwest"]
 nodus-discovery = { workspace = true }
 nodus-client-core = { workspace = true }
 nodus-persist = { workspace = true }
+nodus-protocol = { workspace = true }
 nodus-runtime = { workspace = true }
 nodus-state = { workspace = true }
 nodus-misskey = { workspace = true, optional = true }

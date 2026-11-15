@@ -49,7 +49,7 @@ impl Probe<'_> {
         if self.misskey.is_some_and(is_misskey) {
             return Some(Protocol::Misskey);
         }
-        if self.mastodon.is_some() {
+        if self.mastodon.is_some_and(is_mastodon) {
             return Some(Protocol::Mastodon);
         }
         None
@@ -70,6 +70,18 @@ pub fn is_nodus(value: &Value) -> bool {
 #[must_use]
 pub fn is_misskey(value: &Value) -> bool {
     value.get("maxNoteTextLength").is_some() || value.get("max_note_text_length").is_some()
+}
+
+/// Whether a document is a Mastodon `/api/v1/instance` or `/api/v2/instance`.
+#[must_use]
+pub fn is_mastodon(value: &Value) -> bool {
+    let has_non_empty_str = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|text| !text.trim().is_empty())
+    };
+    has_non_empty_str("version") || has_non_empty_str("domain") || has_non_empty_str("uri")
 }
 
 /// The endpoints a chosen protocol uses.
@@ -121,7 +133,7 @@ impl Protocol {
 ///
 /// A failed request is evidence of absence, not an error: an instance that does not
 /// answer `/api/meta` is still a Mastodon instance if `/api/v2/instance` answered.
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub async fn detect(base: &str) -> Option<Protocol> {
     let base = base.trim_end_matches('/');
     let client = reqwest::Client::builder()
@@ -157,7 +169,7 @@ pub async fn detect(base: &str) -> Option<Protocol> {
 }
 
 /// The Nodus capability names this server advertises.
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub async fn capabilities(base: &str) -> Vec<String> {
     let base = base.trim_end_matches('/');
     let Ok(client) = reqwest::Client::builder()
@@ -182,7 +194,10 @@ pub async fn capabilities(base: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-#[cfg(any(feature = "native", target_arch = "wasm32"))]
+#[cfg(any(
+    all(feature = "native", not(target_arch = "wasm32")),
+    target_arch = "wasm32"
+))]
 fn feature_names(value: &Value) -> Vec<String> {
     value
         .get("features")
@@ -203,10 +218,11 @@ async fn fetch_wasm(url: &str) -> Option<Value> {
     if !response.ok() {
         return None;
     }
-    response.json().await.ok()
+    let text = response.text().await.ok()?;
+    serde_json::from_str(&text).ok()
 }
 
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 async fn fetch(client: &reqwest::Client, url: &str) -> Option<Value> {
     let response = client.get(url).send().await.ok()?;
     if !response.status().is_success() {
@@ -272,5 +288,36 @@ mod tests {
     #[test]
     fn no_document_means_no_detection() {
         assert_eq!(Probe::default().detect(), None);
+    }
+
+    #[test]
+    fn an_empty_object_is_not_a_mastodon_server() {
+        let empty = json!({});
+        let blank_version = json!({ "version": "  " });
+        assert_eq!(
+            Probe {
+                mastodon: Some(&empty),
+                ..Probe::default()
+            }
+            .detect(),
+            None
+        );
+        assert_eq!(
+            Probe {
+                mastodon: Some(&blank_version),
+                ..Probe::default()
+            }
+            .detect(),
+            None
+        );
+        let domain_only = json!({ "domain": "mastodon.social" });
+        assert_eq!(
+            Probe {
+                mastodon: Some(&domain_only),
+                ..Probe::default()
+            }
+            .detect(),
+            Some(Protocol::Mastodon)
+        );
     }
 }

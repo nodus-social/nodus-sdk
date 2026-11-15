@@ -3,7 +3,7 @@
 //! Everything here is plain data in a [`Handle`](crate::Handle): no methods that
 //! reach the network, no framework types. Views read it, [`Command`]s change it.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use nodus_client_core::model::{Account, Status};
 use nodus_protocol::Capabilities;
@@ -131,6 +131,8 @@ impl Degraded {
 /// Recommendation feed state.
 #[derive(Debug, Clone, Default)]
 pub struct FeedState {
+    /// Snapshot id, needed to report impressions against the list they were shown in.
+    pub feed_id: Option<String>,
     /// Items in display order; already ranked by the server.
     pub items: Vec<AccountItem>,
     /// Opaque cursor for the next page.
@@ -143,19 +145,33 @@ pub struct FeedState {
     pub dismissed: Vec<i64>,
 }
 
+fn parse_degraded(flag: Option<&str>) -> Vec<Degraded> {
+    flag.and_then(Degraded::from_wire).into_iter().collect()
+}
+
 impl FeedState {
     /// Replaces the feed contents with a fresh server response.
     pub fn replace(&mut self, feed: AccountFeed) {
+        self.feed_id = Some(feed.feed_id);
         self.items = feed.items;
         self.next_cursor = feed.next_cursor;
         self.generated_at = Some(feed.generated_at);
-        self.degraded = feed
-            .degraded
-            .as_deref()
-            .and_then(Degraded::from_wire)
-            .into_iter()
-            .collect();
+        self.degraded = parse_degraded(feed.degraded.as_deref());
         self.dismissed.clear();
+    }
+
+    /// Appends a continuation page, keeping the original snapshot id and dropping duplicates.
+    pub fn extend(&mut self, feed: AccountFeed) {
+        self.feed_id.get_or_insert(feed.feed_id);
+        let known: HashSet<i64> = self.items.iter().map(|item| item.item_id).collect();
+        self.items.extend(
+            feed.items
+                .into_iter()
+                .filter(|item| !known.contains(&item.item_id)),
+        );
+        self.next_cursor = feed.next_cursor;
+        self.generated_at = Some(feed.generated_at);
+        self.degraded = parse_degraded(feed.degraded.as_deref());
     }
 
     /// Hides an item until the next refresh.
@@ -200,12 +216,7 @@ impl PostFeedState {
         self.items = feed.items;
         self.next_cursor = feed.next_cursor;
         self.generated_at = Some(feed.generated_at);
-        self.degraded = feed
-            .degraded
-            .as_deref()
-            .and_then(Degraded::from_wire)
-            .into_iter()
-            .collect();
+        self.degraded = parse_degraded(feed.degraded.as_deref());
     }
 
     /// Appends a continuation page, dropping ids already shown.
@@ -217,8 +228,8 @@ impl PostFeedState {
         // A continuation page belongs to the snapshot it cursor came from, so the id
         // is kept rather than overwritten: impressions must name the list they were
         // shown in, and the first page's id is the one the server minted.
-        self.feed_id.get_or_insert(feed.feed_id.clone());
-        let known: Vec<i64> = self.items.iter().map(|item| item.item_id).collect();
+        self.feed_id.get_or_insert(feed.feed_id);
+        let known: HashSet<i64> = self.items.iter().map(|item| item.item_id).collect();
         self.items.extend(
             feed.items
                 .into_iter()
@@ -226,12 +237,7 @@ impl PostFeedState {
         );
         self.next_cursor = feed.next_cursor;
         self.generated_at = Some(feed.generated_at);
-        self.degraded = feed
-            .degraded
-            .as_deref()
-            .and_then(Degraded::from_wire)
-            .into_iter()
-            .collect();
+        self.degraded = parse_degraded(feed.degraded.as_deref());
     }
 }
 
@@ -378,5 +384,53 @@ mod tests {
 
         state.replace(feed(None));
         assert_eq!(state.dismissed, Vec::<i64>::new());
+    }
+
+    #[test]
+    fn replace_keeps_feed_id_and_extend_appends_unique_items() {
+        let item = |item_id: i64| AccountItem {
+            item_id,
+            account: nodus_shared::FeedAccount {
+                id: format!("acct-{item_id}"),
+                acct: format!("u{item_id}@remote.test"),
+                display_name: "User".to_owned(),
+                note: String::new(),
+                avatar_url: String::new(),
+                followers_count: 0,
+                last_status_at: None,
+                bot: false,
+                already_following: false,
+            },
+            reason: nodus_shared::Reason {
+                code: "followed_by_similar_users".to_owned(),
+                support: 0,
+                sample_followers: Vec::new(),
+                via: None,
+            },
+        };
+
+        let mut page1 = feed(Some("c1"));
+        page1.items = vec![item(1), item(2)];
+
+        let mut state = FeedState::default();
+        state.replace(page1);
+        state.dismiss(1);
+        assert_eq!(state.feed_id.as_deref(), Some("f1"));
+
+        let mut page2 = feed(None);
+        page2.feed_id = "f2".to_owned();
+        page2.items = vec![item(2), item(3)];
+        state.extend(page2);
+
+        assert_eq!(state.feed_id.as_deref(), Some("f1"));
+        assert_eq!(
+            state.items.iter().map(|i| i.item_id).collect::<Vec<_>>(),
+            vec![1, 2, 3]
+        );
+        assert_eq!(
+            state.visible().map(|i| i.item_id).collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert_eq!(state.next_cursor, None);
     }
 }

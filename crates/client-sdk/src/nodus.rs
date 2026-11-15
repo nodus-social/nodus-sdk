@@ -11,23 +11,7 @@ use serde_json::Value;
 use url::Url;
 
 use nodus_client_core::{Error, Instance, Result};
-
-/// A capability answer from `/api/v1/nodus/capabilities`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Capabilities {
-    /// Wire contract, e.g. `nodus-1`.
-    pub contract: String,
-    /// Feature names the server implements.
-    pub features: Vec<String>,
-}
-
-impl Capabilities {
-    /// Whether a named feature is advertised.
-    #[must_use]
-    pub fn supports(&self, feature: &str) -> bool {
-        self.features.iter().any(|value| value == feature)
-    }
-}
+pub use nodus_protocol::{Capabilities, Feature};
 
 /// One hash-chain answer.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -110,8 +94,10 @@ impl NodusClient {
     ///
     /// Returns a transport or decode error.
     pub async fn capabilities(&self) -> Result<Capabilities> {
-        self.decode(self.http.get(self.url("/api/v1/nodus/capabilities")?))
-            .await
+        let value: Value = self
+            .decode(self.http.get(self.url("/api/v1/nodus/capabilities")?))
+            .await?;
+        Capabilities::from_meta(&value).map_err(|error| Error::Decode(error.to_string()))
     }
 
     /// Run ordered batch calls. The caller supplies the server's `BatchCall` JSON.
@@ -156,13 +142,14 @@ mod tests {
 
     #[test]
     fn capabilities_read_feature_names() {
-        let answer: Capabilities = serde_json::from_value(serde_json::json!({
+        let answer = Capabilities::from_meta(&serde_json::json!({
             "contract": "nodus-1",
             "features": ["batch", "events", "state_sync"]
         }))
         .expect("capabilities");
-        assert!(answer.supports("batch"));
-        assert!(!answer.supports("search"));
+        assert!(answer.supports(Feature::Batch));
+        assert!(answer.supports(Feature::Events));
+        assert!(!answer.supports(Feature::SyncToken));
     }
 
     #[test]

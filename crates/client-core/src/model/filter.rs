@@ -140,7 +140,10 @@ fn contains_word(haystack: &str, needle: &str) -> bool {
         if bounded(before) && bounded(after) {
             return true;
         }
-        start = at + needle.len();
+        let Some(ch) = haystack[at..].chars().next() else {
+            break;
+        };
+        start = at + ch.len_utf8();
     }
     false
 }
@@ -234,6 +237,14 @@ mod tests {
         assert!(filter.matches("a cat, sitting"));
         assert!(filter.matches("cat"));
         assert!(filter.matches("the cat's toy"));
+    }
+
+    #[test]
+    fn a_whole_word_finds_overlapping_match_after_non_boundary_prefix() {
+        let filter = filter(FilterAction::Warn, &[("a#a", true)]);
+        assert!(filter.matches("xa#a#a"));
+        assert!(filter.matches("éa#a#a"));
+        assert!(!filter.matches("xa#a#ax"));
     }
 
     #[test]

@@ -67,6 +67,14 @@ impl InstanceApi for UnavailableBackend {
         unavailable()
     }
 
+    fn list_timeline(
+        &self,
+        _list_id: &str,
+        _params: PageParams,
+    ) -> impl Future<Output = Result<Page<Status>, Self::Error>> {
+        unavailable()
+    }
+
     fn status(&self, _id: &str) -> impl Future<Output = Result<Status, Self::Error>> {
         unavailable()
     }

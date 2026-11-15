@@ -203,6 +203,14 @@ impl InstanceApi for Pages {
         fail::<Page<Status>>()
     }
 
+    fn list_timeline(
+        &self,
+        _list_id: &str,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        fail::<Page<Status>>()
+    }
+
     fn status(&self, _id: &str) -> impl core::future::Future<Output = Result<Status, Self::Error>> {
         fail::<Status>()
     }
@@ -554,4 +562,809 @@ fn signing_out_clears_all_private_state() {
     assert!(state.pages.with(std::collections::HashMap::is_empty));
     assert!(sdk.read_account("acct-dm").is_none());
     assert!(state.accounts.with(std::collections::HashMap::is_empty));
+}
+
+fn account(id: &str) -> Account {
+    serde_json::from_value(serde_json::json!({
+        "id": id,
+        "acct": format!("{id}@remote.test"),
+        "display_name": id
+    }))
+    .expect("valid account")
+}
+
+fn boosted_status(id: &str, booster: &str, original_id: &str, author: &str) -> Status {
+    let mut inner = status(original_id);
+    inner.account = account(author);
+    let mut outer = status(id);
+    outer.account = account(booster);
+    outer.reblog = Some(Box::new(inner));
+    outer
+}
+
+/// Mock instance that distinguishes home, list, and browse endpoints.
+struct RichInstance {
+    timeline_calls: core::cell::Cell<usize>,
+    list_calls: core::cell::RefCell<Vec<String>>,
+    list_statuses: Vec<Status>,
+    favourites_statuses: Vec<Status>,
+    notifications: Vec<Notification>,
+    conversations: Vec<nodus_client_core::model::Conversation>,
+    search_results: nodus_client_core::model::SearchResults,
+}
+
+impl Default for RichInstance {
+    fn default() -> Self {
+        Self {
+            timeline_calls: core::cell::Cell::new(0),
+            list_calls: core::cell::RefCell::new(Vec::new()),
+            list_statuses: Vec::new(),
+            favourites_statuses: Vec::new(),
+            notifications: Vec::new(),
+            conversations: Vec::new(),
+            search_results: nodus_client_core::model::SearchResults::default(),
+        }
+    }
+}
+
+impl InstanceApi for RichInstance {
+    type Error = Unavailable;
+
+    fn verify_credentials(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Account, Self::Error>> {
+        fail::<Account>()
+    }
+
+    fn credential_account(
+        &self,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::CredentialAccount, Self::Error>>
+    {
+        fail::<nodus_client_core::CredentialAccount>()
+    }
+
+    fn timeline(
+        &self,
+        _kind: StreamKind,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        self.timeline_calls.set(self.timeline_calls.get() + 1);
+        core::future::ready(Ok(Page::new(vec![status("home-only")])))
+    }
+
+    fn tag_timeline(
+        &self,
+        _tag: &str,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        fail::<Page<Status>>()
+    }
+
+    fn list_timeline(
+        &self,
+        list_id: &str,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        self.list_calls.borrow_mut().push(list_id.to_owned());
+        core::future::ready(Ok(Page::new(self.list_statuses.clone())))
+    }
+
+    fn status(&self, _id: &str) -> impl core::future::Future<Output = Result<Status, Self::Error>> {
+        fail::<Status>()
+    }
+
+    fn status_context(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<Context, Self::Error>> {
+        fail::<Context>()
+    }
+
+    fn notifications(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Notification>, Self::Error>> {
+        core::future::ready(Ok(Page::new(self.notifications.clone())))
+    }
+
+    fn account(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Account, Self::Error>> {
+        fail::<Account>()
+    }
+
+    fn account_lookup(
+        &self,
+        _acct: &str,
+    ) -> impl core::future::Future<Output = Result<Account, Self::Error>> {
+        fail::<Account>()
+    }
+
+    fn account_followers(
+        &self,
+        _id: &LocalId,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn account_following(
+        &self,
+        _id: &LocalId,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn account_statuses(
+        &self,
+        _id: &LocalId,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        fail::<Page<Status>>()
+    }
+
+    fn relationship(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn follow(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn unfollow(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn post_status(
+        &self,
+        _draft: &Draft,
+    ) -> impl core::future::Future<Output = Result<Status, Self::Error>> {
+        fail::<Status>()
+    }
+
+    fn delete_status(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+}
+
+impl nodus_client_core::actions::Browse for RichInstance {
+    type Error = Unavailable;
+
+    fn favourites(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        core::future::ready(Ok(Page::new(self.favourites_statuses.clone())))
+    }
+
+    fn bookmarks(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        fail::<Page<Status>>()
+    }
+
+    fn conversations(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<
+        Output = Result<Page<nodus_client_core::model::Conversation>, Self::Error>,
+    > {
+        core::future::ready(Ok(Page::new(self.conversations.clone())))
+    }
+
+    fn mark_conversation_read(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn directory(
+        &self,
+        _local_only: bool,
+        _offset: u32,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        fail::<Vec<Account>>()
+    }
+
+    fn mute_conversation(
+        &self,
+        _id: &str,
+        _muted: bool,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::Conversation, Self::Error>>
+    {
+        fail::<nodus_client_core::model::Conversation>()
+    }
+
+    fn lists(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<nodus_client_core::model::List>, Self::Error>>
+    {
+        fail::<Vec<nodus_client_core::model::List>>()
+    }
+
+    fn create_list(
+        &self,
+        _title: &str,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::List, Self::Error>>
+    {
+        fail::<nodus_client_core::model::List>()
+    }
+
+    fn rename_list(
+        &self,
+        _id: &str,
+        _title: &str,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::List, Self::Error>>
+    {
+        fail::<nodus_client_core::model::List>()
+    }
+
+    fn delete_list(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn add_to_list(
+        &self,
+        _list_id: &str,
+        _accounts: &[LocalId],
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn remove_from_list(
+        &self,
+        _list_id: &str,
+        _accounts: &[LocalId],
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn list_accounts(
+        &self,
+        _list_id: &str,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        fail::<Vec<Account>>()
+    }
+
+    fn list_timeline(
+        &self,
+        list_id: &str,
+        params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        <Self as InstanceApi>::list_timeline(self, list_id, params)
+    }
+}
+
+impl nodus_client_core::actions::AccountActions for RichInstance {
+    type Error = Unavailable;
+
+    fn mute(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn unmute(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn block(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn unblock(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn relationships(
+        &self,
+        _ids: &[LocalId],
+    ) -> impl core::future::Future<Output = Result<Vec<Relationship>, Self::Error>> {
+        fail::<Vec<Relationship>>()
+    }
+
+    fn followers(
+        &self,
+        _id: &LocalId,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn following(
+        &self,
+        _id: &LocalId,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn mutes(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn blocks(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn follow_requests(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        fail::<Vec<Account>>()
+    }
+
+    fn authorize_follow_request(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Relationship, Self::Error>> {
+        fail::<Relationship>()
+    }
+
+    fn reject_follow_request(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn update_profile(
+        &self,
+        _update: &nodus_client_core::model::ProfileUpdate,
+    ) -> impl core::future::Future<Output = Result<Account, Self::Error>> {
+        fail::<Account>()
+    }
+}
+
+impl nodus_client_core::actions::Search for RichInstance {
+    type Error = Unavailable;
+
+    fn search(
+        &self,
+        _query: &str,
+        _resolve: bool,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::SearchResults, Self::Error>>
+    {
+        core::future::ready(Ok(self.search_results.clone()))
+    }
+}
+
+impl nodus_client_core::actions::ScheduleActions for RichInstance {
+    type Error = Unavailable;
+
+    fn scheduled(
+        &self,
+    ) -> impl core::future::Future<
+        Output = Result<Vec<nodus_client_core::model::ScheduledStatus>, Self::Error>,
+    > {
+        fail::<Vec<nodus_client_core::model::ScheduledStatus>>()
+    }
+
+    fn schedule(
+        &self,
+        _draft: &Draft,
+        _scheduled_at: &str,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::ScheduledStatus, Self::Error>>
+    {
+        fail::<nodus_client_core::model::ScheduledStatus>()
+    }
+
+    fn cancel_scheduled(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+}
+
+impl nodus_client_core::actions::FilterActions for RichInstance {
+    type Error = Unavailable;
+
+    fn filters(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<nodus_client_core::model::Filter>, Self::Error>>
+    {
+        fail::<Vec<nodus_client_core::model::Filter>>()
+    }
+
+    fn create_filter(
+        &self,
+        _draft: &nodus_client_core::model::FilterDraft,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::Filter, Self::Error>>
+    {
+        fail::<nodus_client_core::model::Filter>()
+    }
+
+    fn update_filter(
+        &self,
+        _id: &str,
+        _draft: &nodus_client_core::model::FilterDraft,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::Filter, Self::Error>>
+    {
+        fail::<nodus_client_core::model::Filter>()
+    }
+
+    fn delete_filter(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+}
+
+impl nodus_client_core::actions::HighlightActions for RichInstance {
+    type Error = Unavailable;
+
+    fn featured_tags(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<
+        Output = Result<Vec<nodus_client_core::model::FeaturedTag>, Self::Error>,
+    > {
+        fail::<Vec<nodus_client_core::model::FeaturedTag>>()
+    }
+
+    fn feature_tag(
+        &self,
+        _name: &str,
+    ) -> impl core::future::Future<Output = Result<nodus_client_core::model::FeaturedTag, Self::Error>>
+    {
+        fail::<nodus_client_core::model::FeaturedTag>()
+    }
+
+    fn unfeature_tag(
+        &self,
+        _id: &str,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn rules(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<nodus_client_core::model::Rule>, Self::Error>>
+    {
+        fail::<Vec<nodus_client_core::model::Rule>>()
+    }
+}
+
+struct PagedDiscovery {
+    page1: AccountFeed,
+    page2: AccountFeed,
+}
+
+impl Discovery for PagedDiscovery {
+    type Error = Unavailable;
+
+    fn meta(&self) -> impl core::future::Future<Output = Result<Meta, Self::Error>> {
+        fail::<Meta>()
+    }
+
+    fn me(&self) -> impl core::future::Future<Output = Result<MeResponse, Self::Error>> {
+        fail::<MeResponse>()
+    }
+
+    fn feed(
+        &self,
+        cursor: Option<&str>,
+    ) -> impl core::future::Future<Output = Result<AccountFeed, Self::Error>> {
+        let answer = if cursor.is_some() {
+            self.page2.clone()
+        } else {
+            self.page1.clone()
+        };
+        core::future::ready(Ok(answer))
+    }
+
+    fn posts(
+        &self,
+        _cursor: Option<&str>,
+    ) -> impl core::future::Future<Output = Result<PostFeed, Self::Error>> {
+        fail::<PostFeed>()
+    }
+
+    fn refresh(
+        &self,
+        _feed_id: &str,
+    ) -> impl core::future::Future<Output = Result<AccountFeed, Self::Error>> {
+        fail::<AccountFeed>()
+    }
+
+    fn send_events(
+        &self,
+        _batch: &EventBatch,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn set_sync(
+        &self,
+        _enable: bool,
+        _telemetry_opt_in: bool,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+}
+
+#[test]
+fn timeline_request_list_fetches_list_timeline_and_upserts_reblog_accounts() {
+    let instance = RichInstance {
+        list_statuses: vec![boosted_status("boost-1", "booster-1", "orig-1", "author-1")],
+        ..RichInstance::default()
+    };
+    let sdk = Sdk::new(
+        instance,
+        Consented(SyncConsent::default()),
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+
+    block_on(sdk.load_timeline(TimelineRequest::List("list-42"), None, 20))
+        .expect("list timeline succeeds");
+
+    let (list_statuses, _) = sdk.read_timeline(&TimelineRequest::List("list-42"));
+    assert_eq!(
+        list_statuses
+            .iter()
+            .map(|s| s.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["boost-1"]
+    );
+    assert_eq!(sdk.read_timeline(&TimelineRequest::Home).0, Vec::new());
+    assert!(sdk.read_account("booster-1").is_some());
+    assert!(
+        sdk.read_account("author-1").is_some(),
+        "reblogged status author must also be upserted"
+    );
+}
+
+#[test]
+fn load_list_page_upserts_accounts_including_reblog_authors() {
+    let instance = RichInstance {
+        list_statuses: vec![boosted_status("boost-2", "booster-2", "orig-2", "author-2")],
+        ..RichInstance::default()
+    };
+    let sdk = Sdk::new(
+        instance,
+        Consented(SyncConsent::default()),
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+
+    block_on(sdk.load_list_page("list-7", None, 20)).expect("list page succeeds");
+
+    assert!(sdk.read_account("booster-2").is_some());
+    assert!(sdk.read_account("author-2").is_some());
+    assert!(sdk.read_status("boost-2").is_some());
+}
+
+#[test]
+fn status_removed_prunes_non_timeline_pages() {
+    use nodus_state::page::{PageItems, PageKind};
+
+    let sdk = sdk_with(SyncConsent::default());
+    sdk.adopt_items(
+        PageKind::Bookmarks,
+        PageItems::Statuses(vec![status("keep"), status("gone")]),
+        None,
+    );
+    sdk.adopt_items(
+        PageKind::Notifications,
+        PageItems::Notifications(vec![Notification {
+            id: "n1".to_owned(),
+            kind: nodus_client_core::model::NotificationKind::Mention,
+            created_at: "2026-11-07T00:00:00.000Z".to_owned(),
+            account: account("acct-n1"),
+            status: Some(status("gone")),
+        }]),
+        None,
+    );
+
+    sdk.dispatch(Command::StatusRemoved("gone".to_owned()));
+
+    let bookmarks = sdk.page(&PageKind::Bookmarks).expect("bookmarks page");
+    if let PageItems::Statuses(items) = bookmarks.items {
+        assert_eq!(
+            items.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            vec!["keep"]
+        );
+    } else {
+        panic!("expected statuses page");
+    }
+    let notes = sdk
+        .page(&PageKind::Notifications)
+        .expect("notifications page");
+    if let PageItems::Notifications(items) = notes.items {
+        assert_eq!(items, Vec::new());
+    } else {
+        panic!("expected notifications page");
+    }
+}
+
+#[test]
+fn load_feed_with_cursor_extends_and_keeps_feed_id() {
+    let (mut page1, _) = sample_feeds();
+    page1.next_cursor = Some("c1".to_owned());
+    let mut page2 = page1.clone();
+    page2.feed_id = "af-2".to_owned();
+    page2.next_cursor = None;
+    page2.items[0].item_id = 11;
+    page2.items[0].account.id = "carol-1".to_owned();
+
+    let sdk = Sdk::new(
+        UnavailableBackend,
+        PagedDiscovery { page1, page2 },
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+
+    block_on(sdk.load_feed(None)).expect("first page");
+    block_on(sdk.load_feed(Some("c1"))).expect("second page");
+
+    let feed = sdk.state().feed.get();
+    assert_eq!(feed.feed_id.as_deref(), Some("af-1"));
+    assert_eq!(
+        feed.items.iter().map(|i| i.item_id).collect::<Vec<_>>(),
+        vec![10, 11]
+    );
+    assert_eq!(feed.next_cursor, None);
+}
+
+#[test]
+fn apply_handles_reblog_accounts_conversations_and_filters_changed() {
+    use nodus_client_core::StreamEvent;
+    use nodus_state::page::{PageItems, PageKind};
+
+    let sdk = sdk_with(SyncConsent::default());
+
+    let boosted = boosted_status("s1", "booster", "s0", "reblog-author");
+    assert!(sdk.apply(&StreamEvent::Update(Box::new(boosted))));
+    assert!(sdk.read_account("booster").is_some());
+    assert!(sdk.read_account("reblog-author").is_some());
+
+    let (dm_status, mut conversation) = sample_dm_conversation();
+    sdk.adopt_items(
+        PageKind::Conversations,
+        PageItems::Conversations(vec![conversation.clone()]),
+        None,
+    );
+    conversation.unread = false;
+    conversation.accounts.push(account("extra-participant"));
+    let updated_dm = boosted_status("dm-2", "alice-dm", "dm-orig", "dm-orig-author");
+    conversation.last_status = Some(updated_dm);
+    assert!(sdk.apply(&StreamEvent::Conversation(Box::new(conversation))));
+
+    assert!(sdk.read_account("extra-participant").is_some());
+    assert!(sdk.read_account("dm-orig-author").is_some());
+    assert!(sdk.read_status("dm-2").is_some());
+    let conv_page = sdk
+        .page(&PageKind::Conversations)
+        .expect("conversations page");
+    if let PageItems::Conversations(items) = conv_page.items {
+        assert!(!items[0].unread);
+        assert_eq!(
+            items[0].last_status.as_ref().map(|s| s.id.as_str()),
+            Some("dm-2")
+        );
+    } else {
+        panic!("expected conversations page");
+    }
+    let _ = dm_status;
+
+    sdk.adopt_items(PageKind::Filters, PageItems::Filters(Vec::new()), None);
+    assert!(
+        sdk.page(&PageKind::Filters)
+            .and_then(|e| e.fetched_at)
+            .is_some()
+    );
+    assert!(sdk.apply(&StreamEvent::FiltersChanged));
+    assert!(
+        sdk.page(&PageKind::Filters)
+            .and_then(|e| e.fetched_at)
+            .is_none()
+    );
+}
+
+#[test]
+fn absorb_upserts_accounts_and_statuses_for_browse_pages() {
+    use nodus_state::page::PageKind;
+
+    let instance = RichInstance {
+        favourites_statuses: vec![boosted_status(
+            "fav-1",
+            "fav-booster",
+            "fav-orig",
+            "fav-author",
+        )],
+        notifications: vec![Notification {
+            id: "note-1".to_owned(),
+            kind: nodus_client_core::model::NotificationKind::Reblog,
+            created_at: "2026-11-07T00:00:00.000Z".to_owned(),
+            account: account("note-actor"),
+            status: Some(boosted_status(
+                "note-status",
+                "note-booster",
+                "note-orig",
+                "note-orig-author",
+            )),
+        }],
+        conversations: vec![nodus_client_core::model::Conversation {
+            id: "conv-absorb".to_owned(),
+            unread: true,
+            accounts: vec![account("conv-peer")],
+            last_status: Some(status("conv-last")),
+        }],
+        search_results: nodus_client_core::model::SearchResults {
+            accounts: vec![account("search-acct")],
+            statuses: vec![boosted_status(
+                "search-status",
+                "search-status-author",
+                "search-orig",
+                "search-orig-author",
+            )],
+            hashtags: Vec::new(),
+        },
+        ..RichInstance::default()
+    };
+
+    let sdk = Sdk::new(
+        instance,
+        Consented(SyncConsent::default()),
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+
+    block_on(sdk.ensure_page(PageKind::Favourites, None, 20, 60_000)).expect("favourites");
+    assert!(sdk.read_account("fav-booster").is_some());
+    assert!(sdk.read_account("fav-author").is_some());
+    assert!(sdk.read_status("fav-1").is_some());
+
+    block_on(sdk.ensure_page(PageKind::Notifications, None, 20, 60_000)).expect("notifications");
+    assert!(sdk.read_account("note-actor").is_some());
+    assert!(sdk.read_account("note-orig-author").is_some());
+    assert!(sdk.read_status("note-status").is_some());
+
+    block_on(sdk.ensure_page(PageKind::Conversations, None, 20, 60_000)).expect("conversations");
+    assert!(sdk.read_account("conv-peer").is_some());
+    assert!(sdk.read_status("conv-last").is_some());
+
+    block_on(sdk.ensure_page(PageKind::Search("rust".to_owned()), None, 20, 60_000))
+        .expect("search");
+    assert!(sdk.read_account("search-acct").is_some());
+    assert!(sdk.read_account("search-status-author").is_some());
+    assert!(sdk.read_account("search-orig-author").is_some());
+    assert!(sdk.read_status("search-status").is_some());
 }

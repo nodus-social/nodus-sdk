@@ -400,8 +400,7 @@ impl<T: Transport> Browse for RestInstance<T> {
     }
 
     async fn list_timeline(&self, list_id: &str, params: PageParams) -> Result<Page<Status>> {
-        let url = self.page_url_segments(&["api", "v1", "timelines", "list", list_id], &params)?;
-        self.fetch_page(self.get(url), &params).await
+        <Self as crate::api::InstanceApi>::list_timeline(self, list_id, params).await
     }
 }
 

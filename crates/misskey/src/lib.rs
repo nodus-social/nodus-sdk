@@ -206,6 +206,20 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
         Ok(Page::new(items).with_next(items_next(&value)))
     }
 
+    async fn list_timeline(&self, list_id: &str, params: PageParams) -> Result<Page<Status>> {
+        let mut body = Self::body(&params);
+        body["listId"] = json!(list_id);
+        let value = self.call("/api/notes/user-list-timeline", body).await?;
+        let items = value
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(convert::status)
+            .collect();
+        Ok(Page::new(items).with_next(items_next(&value)))
+    }
+
     async fn status(&self, id: &str) -> Result<Status> {
         let value = self
             .call("/api/notes/show", json!({ "noteId": id }))

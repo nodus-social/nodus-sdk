@@ -54,6 +54,13 @@ pub trait InstanceApi {
         params: PageParams,
     ) -> impl Future<Output = Result<Page<Status>, Self::Error>>;
 
+    /// A list's timeline, newest first.
+    fn list_timeline(
+        &self,
+        list_id: &str,
+        params: PageParams,
+    ) -> impl Future<Output = Result<Page<Status>, Self::Error>>;
+
     /// One status.
     fn status(&self, id: &str) -> impl Future<Output = Result<Status, Self::Error>>;
 

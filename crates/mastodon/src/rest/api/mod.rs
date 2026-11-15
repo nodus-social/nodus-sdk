@@ -50,6 +50,11 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
         self.fetch_page(self.get(url), &params).await
     }
 
+    async fn list_timeline(&self, list_id: &str, params: PageParams) -> Result<Page<Status>> {
+        let url = self.page_url_segments(&["api", "v1", "timelines", "list", list_id], &params)?;
+        self.fetch_page(self.get(url), &params).await
+    }
+
     async fn status(&self, id: &str) -> Result<Status> {
         let url = self.url_segments(&["api", "v1", "statuses", id])?;
         self.fetch(self.get(url)).await
