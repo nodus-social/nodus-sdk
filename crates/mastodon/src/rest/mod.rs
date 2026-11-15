@@ -225,6 +225,15 @@ impl<T: Transport> RestInstance<T> {
         decode(&response)
     }
 
+    /// Sends a request and checks for a 2xx status without decoding the body.
+    ///
+    /// Used for endpoints whose success response may be an empty 200/204 body or an
+    /// ignored JSON object such as `{}`.
+    pub async fn send_empty(&self, request: HttpRequest) -> Result<()> {
+        let response = self.transport.send(request).await?;
+        check_status(&response)
+    }
+
     /// Fetches a page, deriving the older-cursor from the last item's id.
     ///
     /// Mastodon has no `next` link on these endpoints; the cursor is the id of the
@@ -296,8 +305,8 @@ fn form_body(form: &[(&str, String)]) -> (String, Vec<u8>) {
     ("application/x-www-form-urlencoded".to_owned(), body)
 }
 
-/// Decodes a response body or turns its status into an [`Error`].
-fn decode<R: DeserializeOwned>(response: &HttpResponse) -> Result<R> {
+/// Maps a non-2xx response to an [`Error`].
+fn check_status(response: &HttpResponse) -> Result<()> {
     if !(200..300).contains(&response.status) {
         return Err(status_error(
             response.status,
@@ -305,6 +314,12 @@ fn decode<R: DeserializeOwned>(response: &HttpResponse) -> Result<R> {
             &response.body,
         ));
     }
+    Ok(())
+}
+
+/// Decodes a response body or turns its status into an [`Error`].
+fn decode<R: DeserializeOwned>(response: &HttpResponse) -> Result<R> {
+    check_status(response)?;
     serde_json::from_slice(&response.body)
         .map_err(|e| Error::Decode(format!("{}: {e}", response.status)))
 }
