@@ -165,9 +165,80 @@ where
         });
     }
 
+    /// Upserts statuses along with every embedded author account (including boosted authors).
+    fn upsert_entities(&self, statuses: Vec<Status>, mut accounts: Vec<Account>) {
+        for status in &statuses {
+            push_status_accounts(status, &mut accounts);
+        }
+        if !accounts.is_empty() {
+            self.dispatch(Command::AccountsUpserted { accounts });
+        }
+        if !statuses.is_empty() {
+            self.dispatch(Command::StatusesUpserted { statuses });
+        }
+    }
+
+    /// Copies the statuses and accounts a page brought into the entity store.
+    ///
+    /// A search result and a follower list then show the same status the timeline shows,
+    /// with the same favourite count, instead of a second copy taken at another moment.
+    fn absorb(&self, items: &PageItems) {
+        match items {
+            PageItems::Statuses(statuses) => self.upsert_entities(statuses.clone(), Vec::new()),
+            PageItems::Accounts(accounts) => self.upsert_entities(Vec::new(), accounts.clone()),
+            PageItems::Notifications(notifications) => {
+                let statuses = notifications
+                    .iter()
+                    .filter_map(|note| note.status.clone())
+                    .collect();
+                let accounts = notifications
+                    .iter()
+                    .map(|note| note.account.clone())
+                    .collect();
+                self.upsert_entities(statuses, accounts);
+            }
+            PageItems::Conversations(conversations) => {
+                let statuses = conversations
+                    .iter()
+                    .filter_map(|conv| conv.last_status.clone())
+                    .collect();
+                let accounts = conversations
+                    .iter()
+                    .flat_map(|conv| conv.accounts.iter().cloned())
+                    .collect();
+                self.upsert_entities(statuses, accounts);
+            }
+            PageItems::Search(results) => {
+                self.upsert_entities(results.statuses.clone(), results.accounts.clone());
+            }
+            PageItems::Empty
+            | PageItems::Scheduled(_)
+            | PageItems::Filters(_)
+            | PageItems::FeaturedTags(_) => {}
+        }
+    }
+
+    /// Removes a deleted status from the entity store, timelines, and non-timeline pages.
+    fn remove_status(&self, id: &str) {
+        self.state.statuses.update(|held| {
+            held.remove(id);
+        });
+        self.state.timelines.update(|pages| {
+            for page in pages.values_mut() {
+                page.status_ids.retain(|held| held != id);
+            }
+        });
+        self.state.pages.update(|pages| {
+            for entry in pages.values_mut() {
+                entry.remove_status(id);
+            }
+        });
+    }
+
     pub fn dispatch(&self, command: Command) {
         match command {
             Command::FeedLoaded(feed) => self.state.feed.update(|state| state.replace(feed)),
+            Command::FeedExtended(feed) => self.state.feed.update(|state| state.extend(feed)),
             Command::DismissItem { item_id } => {
                 self.state.feed.update(|state| state.dismiss(item_id));
             }
@@ -265,17 +336,15 @@ where
                     }
                 });
             }
-            Command::StatusRemoved(id) => {
-                self.state.statuses.update(|held| {
-                    held.remove(&id);
-                });
-                self.state.timelines.update(|pages| {
-                    for page in pages.values_mut() {
-                        page.status_ids.retain(|held| held != &id);
-                    }
-                });
-            }
+            Command::StatusRemoved(id) => self.remove_status(&id),
         }
+    }
+}
+
+fn push_status_accounts(status: &Status, accounts: &mut Vec<Account>) {
+    accounts.push(status.account.clone());
+    if let Some(reblog) = &status.reblog {
+        push_status_accounts(reblog, accounts);
     }
 }
 
@@ -409,38 +478,35 @@ where
                     .account_statuses(&nodus_client_core::LocalId(id.to_string()), params)
                     .await
             }
-            other => self.instance.timeline(stream_kind(other), params).await,
+            TimelineRequest::List(id) => self.instance.list_timeline(id, params).await,
+            TimelineRequest::Home => self.instance.timeline(StreamKind::User, params).await,
+            TimelineRequest::Local => self.instance.timeline(StreamKind::Local, params).await,
+            TimelineRequest::Federated => {
+                self.instance.timeline(StreamKind::Federated, params).await
+            }
         }
         .map_err(SdkError::Instance)?;
 
-        // One write for the entities, one for the page: a page is ids, and the
-        // statuses it names live in exactly one place.
-        self.dispatch(Command::StatusesUpserted {
-            statuses: page.items.clone(),
-        });
-        self.dispatch(Command::AccountsUpserted {
-            accounts: page
-                .items
-                .iter()
-                .map(|status| status.account.clone())
-                .collect(),
-        });
-
-        let page = TimelinePage {
+        let timeline_page = TimelinePage {
             status_ids: page.items.iter().map(|status| status.id.clone()).collect(),
             max_id: page.next_max_id,
             fetched_at: Some(self.clock.now_unix_millis()),
         };
+
+        // One write for the entities, one for the page: a page is ids, and the
+        // statuses it names live in exactly one place.
+        self.upsert_entities(page.items, Vec::new());
+
         let (which, tag) = request.key();
         self.dispatch(Command::TimelineLoaded {
             which,
             tag,
-            page: page.clone(),
+            page: timeline_page.clone(),
             // A cursor means "older than what I hold", so it extends the page; no
             // cursor means "the newest", so it replaces.
             append: cursor.is_some(),
         });
-        Ok(page)
+        Ok(timeline_page)
     }
 
     /// Applies one streaming event to state.
@@ -455,13 +521,7 @@ where
     pub fn apply(&self, event: &StreamEvent) -> bool {
         match event {
             StreamEvent::Update(status) | StreamEvent::StatusUpdate(status) => {
-                let status = (**status).clone();
-                self.dispatch(Command::AccountsUpserted {
-                    accounts: vec![status.account.clone()],
-                });
-                self.dispatch(Command::StatusesUpserted {
-                    statuses: vec![status],
-                });
+                self.upsert_entities(vec![(**status).clone()], Vec::new());
                 true
             }
             StreamEvent::Delete(id) => {
@@ -470,33 +530,25 @@ where
                 known
             }
             StreamEvent::Notification(note) => {
-                let mut accounts = vec![note.account.clone()];
-                accounts.extend(note.status.as_ref().map(|status| status.account.clone()));
-                self.dispatch(Command::AccountsUpserted { accounts });
-                match &note.status {
-                    Some(status) => {
-                        self.dispatch(Command::StatusesUpserted {
-                            statuses: vec![status.clone()],
-                        });
-                        true
-                    }
-                    None => false,
-                }
+                let statuses = note.status.iter().cloned().collect();
+                self.upsert_entities(statuses, vec![note.account.clone()]);
+                true
             }
-            StreamEvent::Conversation(thread) => match &thread.last_status {
-                Some(status) => {
-                    self.dispatch(Command::AccountsUpserted {
-                        accounts: vec![status.account.clone()],
-                    });
-                    self.dispatch(Command::StatusesUpserted {
-                        statuses: vec![status.clone()],
-                    });
-                    true
-                }
-                None => false,
-            },
-            // Filters and events this client does not model say nothing about state.
-            StreamEvent::FiltersChanged | StreamEvent::Unknown(_) => false,
+            StreamEvent::Conversation(thread) => {
+                let statuses = thread.last_status.iter().cloned().collect();
+                self.upsert_entities(statuses, thread.accounts.clone());
+                self.dispatch(Command::ConversationsUpserted {
+                    items: vec![(**thread).clone()],
+                });
+                true
+            }
+            StreamEvent::FiltersChanged => {
+                self.dispatch(Command::PageStale {
+                    kind: PageKind::Filters,
+                });
+                true
+            }
+            StreamEvent::Unknown(_) => false,
         }
     }
 
@@ -542,13 +594,11 @@ where
         statuses: Vec<Status>,
         cursor: Option<String>,
     ) {
-        let accounts = accounts_from_statuses(&statuses);
         let status_ids = statuses
             .iter()
             .map(|status| status.id.clone())
             .collect::<Vec<_>>();
-        self.dispatch(Command::StatusesUpserted { statuses });
-        self.dispatch(Command::AccountsUpserted { accounts });
+        self.upsert_entities(statuses, Vec::new());
         self.dispatch(Command::TimelineLoaded {
             which,
             tag,
@@ -567,6 +617,7 @@ where
     /// Same contract as [`Self::adopt_page`]: this is the server's answer, not a guess, so it
     /// carries a timestamp and the screen's `held` check stops asking.
     pub fn adopt_items(&self, kind: PageKind, items: PageItems, cursor: Option<String>) {
+        self.absorb(&items);
         self.dispatch(Command::PageLoaded {
             kind,
             items,
@@ -574,6 +625,12 @@ where
             append: false,
             fetched_at: self.clock.now_unix_millis(),
         });
+    }
+
+    /// A stored page, as the last fetch left it.
+    #[must_use]
+    pub fn page(&self, kind: &PageKind) -> Option<PageEntry> {
+        self.state.pages.with(|pages| pages.get(kind).cloned())
     }
 
     /// When the newest page of a timeline was fetched.
@@ -642,7 +699,11 @@ where
             .feed(cursor)
             .await
             .map_err(SdkError::Discovery)?;
-        self.dispatch(Command::FeedLoaded(feed.clone()));
+        if cursor.is_some() {
+            self.dispatch(Command::FeedExtended(feed.clone()));
+        } else {
+            self.dispatch(Command::FeedLoaded(feed.clone()));
+        }
         Ok(feed)
     }
 
@@ -755,9 +816,7 @@ where
         };
         if let Ok(Some(bytes)) = self.persistence.load(&statuses_key).await {
             if let Ok(statuses) = serde_json::from_slice::<Vec<Status>>(&bytes) {
-                let accounts = accounts_from_statuses(&statuses);
-                self.dispatch(Command::AccountsUpserted { accounts });
-                self.dispatch(Command::StatusesUpserted { statuses });
+                self.upsert_entities(statuses, Vec::new());
             }
         }
 
@@ -827,29 +886,6 @@ where
     }
 }
 
-fn accounts_from_statuses(statuses: &[Status]) -> Vec<Account> {
-    statuses
-        .iter()
-        .flat_map(|status| {
-            std::iter::once(status.account.clone())
-                .chain(status.reblog.as_ref().map(|inner| inner.account.clone()))
-        })
-        .collect()
-}
-
-const fn stream_kind(request: &TimelineRequest<'_>) -> StreamKind {
-    match request {
-        // An account timeline is fetched through `account_statuses`, never through
-        // the streaming stream kind; the arm exists to keep the match total.
-        TimelineRequest::Home
-        | TimelineRequest::Tag(_)
-        | TimelineRequest::Account(_)
-        | TimelineRequest::List(_) => StreamKind::User,
-        TimelineRequest::Local => StreamKind::Local,
-        TimelineRequest::Federated => StreamKind::Federated,
-    }
-}
-
 impl<I, D, P, C> Sdk<I, D, P, C>
 where
     // Every action trait reports through the instance's own error: one error type per
@@ -868,9 +904,7 @@ where
     /// Loads one list's posts into the timeline store.
     ///
     /// A list timeline is a timeline, so it lives where every other one does: `/lists`
-    /// keeps no copy of its own and a revisit paints from state. It is separate from
-    /// `load_timeline` because that method is available to every `Sdk`, while reading a
-    /// list needs the `Browse` port — one screen should not widen the bound on all of them.
+    /// keeps no copy of its own and a revisit paints from state.
     ///
     /// # Errors
     ///
@@ -882,36 +916,8 @@ where
         cursor: Option<&str>,
         limit: u16,
     ) -> Result<TimelinePage, SdkError<<I as InstanceApi>::Error, D::Error>> {
-        let params = match cursor {
-            Some(cursor) => PageParams::after(cursor, limit),
-            None => PageParams::first(limit),
-        };
-        let page = self
-            .instance
-            .list_timeline(id, params)
+        self.load_timeline(TimelineRequest::List(id), cursor, limit)
             .await
-            .map_err(SdkError::Instance)?;
-        let recipe = TimelinePage {
-            status_ids: page.items.iter().map(|status| status.id.clone()).collect(),
-            max_id: page.next_max_id.clone(),
-            fetched_at: Some(self.clock.now_unix_millis()),
-        };
-        self.dispatch(Command::StatusesUpserted {
-            statuses: page.items,
-        });
-        self.dispatch(Command::TimelineLoaded {
-            which: Timeline::List(id.to_owned()),
-            tag: None,
-            page: recipe.clone(),
-            append: cursor.is_some(),
-        });
-        Ok(recipe)
-    }
-
-    /// A stored page, as the last fetch left it.
-    #[must_use]
-    pub fn page(&self, kind: &PageKind) -> Option<PageEntry> {
-        self.state.pages.with(|pages| pages.get(kind).cloned())
     }
 
     /// Loads a page unless the one held answers the question.
@@ -1107,35 +1113,6 @@ where
             PageKind::Filters | PageKind::FeaturedTags => self.settings_items(kind).await?,
         };
         Ok(answer)
-    }
-
-    /// Copies the statuses and accounts a page brought into the entity store.
-    ///
-    /// A search result and a follower list then show the same status the timeline shows,
-    /// with the same favourite count, instead of a second copy taken at another moment.
-    fn absorb(&self, items: &PageItems) {
-        match items {
-            PageItems::Statuses(statuses) => self.dispatch(Command::StatusesUpserted {
-                statuses: statuses.clone(),
-            }),
-            PageItems::Accounts(accounts) => self.dispatch(Command::AccountsUpserted {
-                accounts: accounts.clone(),
-            }),
-            PageItems::Search(results) => {
-                self.dispatch(Command::StatusesUpserted {
-                    statuses: results.statuses.clone(),
-                });
-                self.dispatch(Command::AccountsUpserted {
-                    accounts: results.accounts.clone(),
-                });
-            }
-            PageItems::Empty
-            | PageItems::Notifications(_)
-            | PageItems::Conversations(_)
-            | PageItems::Scheduled(_)
-            | PageItems::Filters(_)
-            | PageItems::FeaturedTags(_) => {}
-        }
     }
 }
 

@@ -32,15 +32,17 @@ pub use nodus_state::{
     TimelinePage, TimelineRequest,
 };
 
+pub use nodus_protocol::{Capabilities, Feature};
+
 /// Detect which client API an instance speaks before opening a transport.
 pub mod protocol;
 pub use protocol::{Endpoints, Probe, Protocol};
 
 /// The Nodus-native performance surface.
-#[cfg(feature = "native")]
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
 pub mod nodus;
-#[cfg(feature = "native")]
-pub use nodus::{Capabilities, NodusClient, SyncDiff};
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub use nodus::{NodusClient, SyncDiff};
 
 /// Mastodon's API, mapped onto the shared client model.
 #[cfg(feature = "mastodon")]

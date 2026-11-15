@@ -22,6 +22,9 @@ pub enum Command {
     /// A fresh feed page arrived from the discovery API.
     FeedLoaded(nodus_shared::AccountFeed),
 
+    /// A continuation page of the account feed arrived from the discovery API.
+    FeedExtended(nodus_shared::AccountFeed),
+
     /// The user dismissed a recommendation.
     DismissItem {
         /// `item_id` of the dismissed item.

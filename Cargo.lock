@@ -607,6 +607,7 @@ dependencies = [
  "nodus-mastodon",
  "nodus-misskey",
  "nodus-persist",
+ "nodus-protocol",
  "nodus-runtime",
  "nodus-state",
  "reqwest",

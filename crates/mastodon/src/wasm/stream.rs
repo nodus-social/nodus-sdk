@@ -48,11 +48,31 @@ impl RestInstance<GlooTransport> {
                 let _ = sink.call1(&JsValue::NULL, &JsValue::from_str(&text));
             }
         });
-        let stream = ActiveStream { socket, on_message };
+        let stream = ActiveStream {
+            kind,
+            socket,
+            on_message,
+        };
         stream
             .socket
             .set_onmessage(Some(stream.on_message.as_ref().unchecked_ref()));
-        shared.0.borrow_mut().streams.push(stream);
+        let pruned: Vec<ActiveStream> = {
+            let mut state = shared.0.borrow_mut();
+            let mut keep = Vec::with_capacity(state.streams.len() + 1);
+            let mut drop_list = Vec::new();
+            for existing in state.streams.drain(..) {
+                let closed = existing.socket.ready_state() >= WebSocket::CLOSING;
+                if closed || existing.kind == kind {
+                    drop_list.push(existing);
+                } else {
+                    keep.push(existing);
+                }
+            }
+            keep.push(stream);
+            state.streams = keep;
+            drop_list
+        };
+        drop(pruned);
         Ok(())
     }
 }

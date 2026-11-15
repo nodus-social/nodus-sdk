@@ -8,6 +8,7 @@ use gloo_net::http::{Headers, Request};
 use wasm_bindgen::closure::Closure;
 use web_sys::{MessageEvent, WebSocket};
 
+use crate::model::StreamKind;
 use crate::rest::{HttpRequest, HttpResponse, Method, RestInstance, Transport};
 use crate::{Error, Instance, Result};
 
@@ -35,22 +36,24 @@ pub(super) struct SharedState {
     pub(super) streams: Vec<ActiveStream>,
 }
 
-impl Drop for SharedState {
-    fn drop(&mut self) {
-        for stream in &self.streams {
-            let _ = stream.socket.close();
-        }
-    }
-}
-
 /// One open stream socket plus the handler attached to it.
 ///
 /// The closure is owned here instead of `forget`-ten, so dropping the transport
 /// drops the socket and its handler together rather than leaking the callback
 /// for the lifetime of the page.
 pub(super) struct ActiveStream {
+    pub(super) kind: StreamKind,
     pub(super) socket: WebSocket,
     pub(super) on_message: Closure<dyn FnMut(MessageEvent)>,
+}
+
+impl Drop for ActiveStream {
+    fn drop(&mut self) {
+        // Detach the JS callback before closing/dropping `on_message`, so a
+        // queued or synchronous message cannot invoke a dropped Rust closure.
+        self.socket.set_onmessage(None);
+        let _ = self.socket.close();
+    }
 }
 
 impl GlooTransport {
