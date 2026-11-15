@@ -36,7 +36,7 @@ impl<T: Transport> ScheduleActions for RestInstance<T> {
     }
 
     async fn cancel_scheduled(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/scheduled_statuses/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "scheduled_statuses", id])?;
         // The answer is an empty body; decoding it as an object would make a successful
         // cancellation look like a failure.
         let _: serde_json::Value = self.fetch(self.delete(url)).await?;

@@ -19,6 +19,8 @@ use core::fmt;
 use serde::de::DeserializeOwned;
 use url::Url;
 
+#[cfg(any(test, all(target_arch = "wasm32", feature = "wasm")))]
+use crate::model::StreamKind;
 use crate::model::{Account, Conversation, List, Notification, Page, PageParams, Status};
 use crate::{Error, Instance, Result};
 
@@ -117,24 +119,64 @@ impl<T: Transport> RestInstance<T> {
 
     /// An absolute URL for `path`, which must start with `/`.
     pub fn url(&self, path: &str) -> Result<Url> {
-        let joined = format!("{}{path}", self.base.as_str().trim_end_matches('/'));
-        Url::parse(&joined).map_err(|e| Error::Transport(format!("{joined}: {e}")))
+        let mut url = self.base.clone();
+        let trimmed = path.trim_start_matches('/');
+        if !trimmed.is_empty() {
+            let segments: Vec<&str> = trimmed.split('/').collect();
+            push_segments(&mut url, &segments)?;
+        }
+        Ok(url)
+    }
+
+    /// An absolute URL built from literal or dynamic path segments.
+    ///
+    /// Each entry in `segments` is appended with [`url::PathSegmentsMut::push`],
+    /// percent-encoding reserved characters (`/`, `?`, `#`, `%`) so untrusted
+    /// identifiers cannot traverse paths or inject query strings or fragments.
+    pub fn url_segments(&self, segments: &[&str]) -> Result<Url> {
+        let mut url = self.base.clone();
+        push_segments(&mut url, segments)?;
+        Ok(url)
     }
 
     /// An absolute URL with the pagination parameters applied as a query string.
     pub fn page_url(&self, path: &str, params: &PageParams) -> Result<Url> {
         let mut url = self.url(path)?;
+        apply_page_params(&mut url, params);
+        Ok(url)
+    }
+
+    /// An absolute URL built from path segments with pagination parameters applied.
+    pub fn page_url_segments(&self, segments: &[&str], params: &PageParams) -> Result<Url> {
+        let mut url = self.url_segments(segments)?;
+        apply_page_params(&mut url, params);
+        Ok(url)
+    }
+
+    /// The WebSocket (`wss://` or `ws://`) URL for a streaming timeline.
+    ///
+    /// The token rides in the query string because a browser `WebSocket` cannot
+    /// send headers; this is the one place the token is written into a URL, and
+    /// no error or log line ever includes that query string.
+    #[cfg(any(test, all(target_arch = "wasm32", feature = "wasm")))]
+    pub(crate) fn stream_url(&self, kind: StreamKind) -> Result<Url> {
+        let mut url = self.url("/api/v1/streaming")?;
+        let ws_scheme = match url.scheme() {
+            "https" => "wss",
+            "http" => "ws",
+            _ => {
+                return Err(Error::Transport(
+                    "/api/v1/streaming: the instance URL has no websocket form".to_owned(),
+                ));
+            }
+        };
+        url.set_scheme(ws_scheme).map_err(|()| {
+            Error::Transport("/api/v1/streaming: the instance URL has no websocket form".to_owned())
+        })?;
         {
             let mut query = url.query_pairs_mut();
-            if let Some(limit) = params.limit {
-                query.append_pair("limit", &limit.to_string());
-            }
-            if let Some(max_id) = &params.max_id {
-                query.append_pair("max_id", max_id);
-            }
-            if let Some(since_id) = &params.since_id {
-                query.append_pair("since_id", since_id);
-            }
+            query.append_pair("stream", stream_name(kind));
+            query.append_pair("access_token", self.token.expose());
         }
         Ok(url)
     }
@@ -350,4 +392,109 @@ pub fn error_message(body: &[u8]) -> String {
         cut -= 1;
     }
     format!("{}…", &trimmed[..cut])
+}
+
+fn push_segments(url: &mut Url, segments: &[&str]) -> Result<()> {
+    let mut path_segments = url.path_segments_mut().map_err(|()| {
+        Error::Transport("the instance base cannot carry path segments".to_owned())
+    })?;
+    path_segments.pop_if_empty();
+    for segment in segments {
+        if matches!(*segment, "" | "." | "..") {
+            return Err(Error::Transport(format!(
+                "invalid path segment {segment:?}"
+            )));
+        }
+        path_segments.push(segment);
+    }
+    Ok(())
+}
+
+fn apply_page_params(url: &mut Url, params: &PageParams) {
+    let mut query = url.query_pairs_mut();
+    if let Some(limit) = params.limit {
+        query.append_pair("limit", &limit.to_string());
+    }
+    if let Some(max_id) = &params.max_id {
+        query.append_pair("max_id", max_id);
+    }
+    if let Some(since_id) = &params.since_id {
+        query.append_pair("since_id", since_id);
+    }
+}
+
+#[cfg(any(test, all(target_arch = "wasm32", feature = "wasm")))]
+const fn stream_name(kind: StreamKind) -> &'static str {
+    match kind {
+        StreamKind::User => "user",
+        StreamKind::Local => "local",
+        StreamKind::Federated => "federated",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Clone, Default)]
+    struct DummyTransport;
+
+    impl Transport for DummyTransport {
+        fn send(
+            &self,
+            _request: HttpRequest,
+        ) -> impl core::future::Future<Output = Result<HttpResponse>> {
+            core::future::ready(Err(Error::Transport("unused".to_owned())))
+        }
+    }
+
+    #[test]
+    fn stream_url_maps_https_to_wss_and_http_to_ws() {
+        let https = Instance::parse("https://mastodon.example/sub").expect("valid https");
+        let secure_client = RestInstance::with_transport(&https, "secret-token", DummyTransport);
+        assert_eq!(
+            secure_client
+                .stream_url(StreamKind::User)
+                .expect("wss stream url")
+                .as_str(),
+            "wss://mastodon.example/sub/api/v1/streaming?stream=user&access_token=secret-token"
+        );
+
+        let http = Instance::parse("http://localhost:3000").expect("valid loopback http");
+        let local_client = RestInstance::with_transport(&http, "secret-token", DummyTransport);
+        assert_eq!(
+            local_client
+                .stream_url(StreamKind::Local)
+                .expect("ws stream url")
+                .as_str(),
+            "ws://localhost:3000/api/v1/streaming?stream=local&access_token=secret-token"
+        );
+
+        let loopback_ip = Instance::parse("http://127.0.0.1:4000/prefix").expect("valid loopback");
+        let loopback_client = RestInstance::with_transport(&loopback_ip, "tok", DummyTransport);
+        assert_eq!(
+            loopback_client
+                .stream_url(StreamKind::Federated)
+                .expect("ws stream url")
+                .as_str(),
+            "ws://127.0.0.1:4000/prefix/api/v1/streaming?stream=federated&access_token=tok"
+        );
+    }
+
+    #[test]
+    fn url_preserves_base_prefix_and_rejects_dot_segments() {
+        let instance = Instance::parse("https://mastodon.example/sub/").expect("valid");
+        let client = RestInstance::with_transport(&instance, "tok", DummyTransport);
+        assert_eq!(
+            client.url("/api/v1/timelines/home").unwrap().as_str(),
+            "https://mastodon.example/sub/api/v1/timelines/home"
+        );
+        assert!(client.url("/api/v1/../admin").is_err());
+        assert!(
+            client
+                .url_segments(&["api", "v1", "statuses", ".."])
+                .is_err()
+        );
+        assert!(client.url_segments(&["api", "v1", "statuses", ""]).is_err());
+    }
 }

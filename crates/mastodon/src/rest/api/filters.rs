@@ -20,13 +20,13 @@ impl<T: Transport> FilterActions for RestInstance<T> {
     }
 
     async fn update_filter(&self, id: &str, draft: &FilterDraft) -> Result<Filter> {
-        let url = self.url(&format!("/api/v2/filters/{id}"))?;
+        let url = self.url_segments(&["api", "v2", "filters", id])?;
         let form = draft_form(draft);
         self.fetch(self.put_form(url, &form)).await
     }
 
     async fn delete_filter(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v2/filters/{id}"))?;
+        let url = self.url_segments(&["api", "v2", "filters", id])?;
         // The body of a delete is empty, so it cannot be decoded as the deleted object.
         let _: serde_json::Value = self.fetch(self.delete(url)).await?;
         Ok(())

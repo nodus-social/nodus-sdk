@@ -74,3 +74,104 @@ pub mod wasm;
 pub use client::DiscoveryClient;
 #[cfg(all(target_arch = "wasm32", feature = "wasm"))]
 pub use wasm::BrowserDiscovery;
+
+/// Resolves a static discovery path against `base` using `Url`'s path-segment writer.
+///
+/// Preserves any path prefix on `base` and rejects empty or dot segments so path
+/// characters cannot alter the origin or route shape.
+#[cfg(any(
+    feature = "native",
+    all(target_arch = "wasm32", feature = "wasm"),
+    test
+))]
+pub(crate) fn resolve_url(base: &url::Url, path: &str) -> Result<url::Url> {
+    let mut url = base.clone();
+    {
+        let mut segments = url
+            .path_segments_mut()
+            .map_err(|()| Error::Transport("the API base cannot carry path segments".to_owned()))?;
+        segments.pop_if_empty();
+        let trimmed = path.trim_start_matches('/');
+        if !trimmed.is_empty() {
+            for segment in trimmed.split('/') {
+                if matches!(segment, "" | "." | "..") {
+                    return Err(Error::Transport(format!(
+                        "{path}: invalid path segment {segment:?}"
+                    )));
+                }
+                segments.push(segment);
+            }
+        }
+    }
+    Ok(url)
+}
+
+/// Builds `/api/v1/feed/{feed_id}/{action}` against `base`, percent-encoding
+/// `feed_id` as a single path segment.
+#[cfg(any(
+    feature = "native",
+    all(target_arch = "wasm32", feature = "wasm"),
+    test
+))]
+pub(crate) fn feed_action_url(base: &url::Url, feed_id: &str, action: &str) -> Result<url::Url> {
+    if matches!(feed_id, "" | "." | "..") || matches!(action, "" | "." | "..") {
+        return Err(Error::Transport(
+            "invalid feed action path segment".to_owned(),
+        ));
+    }
+    let mut url = resolve_url(base, "/api/v1/feed")?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|()| {
+            Error::Transport("/api/v1/feed: the API base cannot carry path segments".to_owned())
+        })?;
+        segments.push(feed_id).push(action);
+    }
+    Ok(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use url::Url;
+
+    use super::{feed_action_url, resolve_url};
+
+    #[test]
+    fn resolve_url_preserves_base_path_prefix() {
+        let base = Url::parse("https://discovery.example/v2/prefix").expect("valid base");
+        let resolved = resolve_url(&base, "/api/v1/meta").expect("resolved");
+        assert_eq!(
+            resolved.as_str(),
+            "https://discovery.example/v2/prefix/api/v1/meta"
+        );
+    }
+
+    #[test]
+    fn feed_action_url_blocks_traversal_origin_override_and_dot_segments() {
+        let base = Url::parse("https://discovery.example/v2").expect("valid base");
+
+        let traversed =
+            feed_action_url(&base, "../admin?x=1#frag", "refresh").expect("encoded segment");
+        assert_eq!(traversed.host_str(), Some("discovery.example"));
+        assert_eq!(
+            traversed.path(),
+            "/v2/api/v1/feed/..%2Fadmin%3Fx=1%23frag/refresh"
+        );
+        assert_eq!(traversed.query(), None);
+        assert_eq!(traversed.fragment(), None);
+
+        let origin_override =
+            feed_action_url(&base, "//evil.example/steal", "refresh").expect("encoded segment");
+        assert_eq!(origin_override.host_str(), Some("discovery.example"));
+        assert_eq!(
+            origin_override.path(),
+            "/v2/api/v1/feed/%2F%2Fevil.example%2Fsteal/refresh"
+        );
+
+        for bad in ["", ".", ".."] {
+            assert!(
+                feed_action_url(&base, bad, "refresh").is_err(),
+                "expected {bad:?} to be rejected"
+            );
+        }
+    }
+}

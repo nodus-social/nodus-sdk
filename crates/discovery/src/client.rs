@@ -123,39 +123,13 @@ impl DiscoveryClient {
     }
 
     /// Resolves a path against the base with `Url`'s path-segment writer.
-    ///
-    /// Using the URL parser rather than `format!` and string concatenation keeps
-    /// the base's own path prefix, percent-encodes each segment, and stops a path
-    /// character from changing the shape of the request. Query parameters are
-    /// appended separately with `query_pairs_mut`, which has its own encoder.
     fn url(&self, path: &str) -> Result<Url> {
-        let mut url = self.base.clone();
-        {
-            let mut segments = url.path_segments_mut().map_err(|()| {
-                Error::Transport("the API base cannot carry path segments".to_owned())
-            })?;
-            segments.pop_if_empty();
-            for segment in path.trim_start_matches('/').split('/') {
-                segments.push(segment);
-            }
-        }
-        Ok(url)
+        crate::resolve_url(&self.base, path)
     }
 
     /// Builds `/api/v1/feed/{feed_id}/{action}`.
-    ///
-    /// `feed_id` is server-provided and opaque, so it is pushed as a path segment
-    /// instead of interpolated into a string. That makes the platform escape any
-    /// reserved character and keeps the route unambiguous.
     fn feed_action_url(&self, feed_id: &str, action: &str) -> Result<Url> {
-        let mut url = self.url("/api/v1/feed")?;
-        {
-            let mut segments = url.path_segments_mut().map_err(|()| {
-                Error::Transport("/api/v1/feed: the API base cannot carry path segments".to_owned())
-            })?;
-            segments.push(feed_id).push(action);
-        }
-        Ok(url)
+        crate::feed_action_url(&self.base, feed_id, action)
     }
 }
 

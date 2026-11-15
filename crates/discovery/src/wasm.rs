@@ -91,31 +91,30 @@ impl BrowserDiscovery {
         headers
     }
 
-    /// Resolves a path against the base with the platform URL parser.
-    ///
-    /// The browser's `URL` object is used instead of string concatenation so the
-    /// result is a URL the `fetch` API accepts verbatim, with the platform's own
-    /// parsing and encoding rules applied to the base and the path.
-    fn url(&self, path: &str) -> Result<web_sys::Url> {
-        web_sys::Url::new_with_base(path, self.base.as_str()).map_err(|_| {
-            Error::Transport(format!("cannot resolve {path} against the discovery base"))
-        })
+    /// Resolves a path against the base with `Url`'s path-segment writer.
+    fn url(&self, path: &str) -> Result<Url> {
+        crate::resolve_url(&self.base, path)
     }
 
-    fn get(&self, url: &web_sys::Url) -> RequestBuilder {
-        Request::get(url.href().as_str()).headers(self.headers())
+    /// Builds `/api/v1/feed/{feed_id}/{action}` with `feed_id` as a single path segment.
+    fn feed_action_url(&self, feed_id: &str, action: &str) -> Result<Url> {
+        crate::feed_action_url(&self.base, feed_id, action)
     }
 
-    fn post(&self, url: &web_sys::Url) -> RequestBuilder {
-        Request::post(url.href().as_str()).headers(self.headers())
+    fn get(&self, url: &Url) -> RequestBuilder {
+        Request::get(url.as_str()).headers(self.headers())
     }
 
-    fn put(&self, url: &web_sys::Url) -> RequestBuilder {
-        Request::put(url.href().as_str()).headers(self.headers())
+    fn post(&self, url: &Url) -> RequestBuilder {
+        Request::post(url.as_str()).headers(self.headers())
     }
 
-    fn delete(&self, url: &web_sys::Url) -> RequestBuilder {
-        Request::delete(url.href().as_str()).headers(self.headers())
+    fn put(&self, url: &Url) -> RequestBuilder {
+        Request::put(url.as_str()).headers(self.headers())
+    }
+
+    fn delete(&self, url: &Url) -> RequestBuilder {
+        Request::delete(url.as_str()).headers(self.headers())
     }
 }
 
@@ -166,14 +165,12 @@ impl Discovery for BrowserDiscovery {
 
     async fn feed(&self, cursor: Option<&str>) -> Result<AccountFeed> {
         let path = "/api/v1/feed/accounts";
-        let url = self.url(path)?;
+        let mut url = self.url(path)?;
         {
-            // `search_params` escapes values with the browser's own encoder, which
-            // is the only reliable way to round-trip an opaque cursor.
-            let params = url.search_params();
-            params.append("limit", &DEFAULT_FEED_LIMIT.to_string());
+            let mut params = url.query_pairs_mut();
+            params.append_pair("limit", &DEFAULT_FEED_LIMIT.to_string());
             if let Some(cursor) = cursor {
-                params.append("cursor", cursor);
+                params.append_pair("cursor", cursor);
             }
         }
         fetch(self.get(&url), "GET", path).await
@@ -181,21 +178,20 @@ impl Discovery for BrowserDiscovery {
 
     async fn posts(&self, cursor: Option<&str>) -> Result<PostFeed> {
         let path = "/api/v1/feed/posts";
-        let url = self.url(path)?;
+        let mut url = self.url(path)?;
         {
-            let params = url.search_params();
-            params.append("limit", &DEFAULT_FEED_LIMIT.to_string());
+            let mut params = url.query_pairs_mut();
+            params.append_pair("limit", &DEFAULT_FEED_LIMIT.to_string());
             if let Some(cursor) = cursor {
-                params.append("cursor", cursor);
+                params.append_pair("cursor", cursor);
             }
         }
         fetch(self.get(&url), "GET", path).await
     }
 
     async fn refresh(&self, feed_id: &str) -> Result<AccountFeed> {
-        let path = format!("/api/v1/feed/{feed_id}/refresh");
-        let url = self.url(&path)?;
-        fetch(self.post(&url), "POST", &path).await
+        let url = self.feed_action_url(feed_id, "refresh")?;
+        fetch(self.post(&url), "POST", "/api/v1/feed/{feed_id}/refresh").await
     }
 
     async fn send_events(&self, batch: &EventBatch) -> Result<()> {
