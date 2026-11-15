@@ -415,3 +415,143 @@ fn a_delete_event_leaves_no_hole_in_a_page() {
         "the deleted id leaves the page rather than rendering as a hole",
     );
 }
+
+fn sample_dm_conversation() -> (Status, nodus_client_core::model::Conversation) {
+    let dm_status: Status = serde_json::from_value(serde_json::json!({
+        "id": "dm-1",
+        "created_at": "2026-11-07T00:00:00.000Z",
+        "content": "<p>secret dm</p>",
+        "visibility": "direct",
+        "account": {
+            "id": "acct-dm",
+            "acct": "alice@remote.test",
+            "display_name": "Alice"
+        }
+    }))
+    .expect("dm status");
+    let conversation = serde_json::from_value(serde_json::json!({
+        "id": "conv-1",
+        "unread": true,
+        "accounts": [dm_status.account.clone()],
+        "last_status": dm_status.clone()
+    }))
+    .expect("conversation");
+    (dm_status, conversation)
+}
+
+fn sample_feeds() -> (AccountFeed, PostFeed) {
+    let account_feed = serde_json::from_value(serde_json::json!({
+        "feed_id": "af-1",
+        "generated_at": "2026-11-07T00:00:00Z",
+        "contract": "0.1.0",
+        "model_version": 1,
+        "similarity_age_hours": 1.0,
+        "items": [{
+            "item_id": 10,
+            "account": {
+                "id": "bob-1",
+                "acct": "bob@remote.test",
+                "display_name": "Bob",
+                "avatar_url": ""
+            },
+            "reason": { "code": "followed_by_similar_users" }
+        }]
+    }))
+    .expect("account feed");
+    let post_feed = serde_json::from_value(serde_json::json!({
+        "feed_id": "pf-1",
+        "generated_at": "2026-11-07T00:00:00Z",
+        "contract": "0.1.0",
+        "model_version": 1,
+        "items": [{
+            "item_id": 20,
+            "status_id": "p-20",
+            "status_remote_id": "p-20",
+            "account_acct": "bob@remote.test",
+            "account_remote_id": "bob-1",
+            "account_display_name": "Bob",
+            "account_avatar_url": "",
+            "text": "<p>recommended</p>",
+            "published_at": "2026-11-07T00:00:00Z",
+            "favourites_count": 0,
+            "reblogs_count": 0,
+            "replies_count": 0,
+            "instance_host": "remote.test",
+            "reason": { "code": "followed_by_similar_users" }
+        }]
+    }))
+    .expect("post feed");
+    (account_feed, post_feed)
+}
+
+#[test]
+fn signing_out_clears_all_private_state() {
+    use nodus_protocol::Capabilities;
+    use nodus_state::page::{PageItems, PageKind};
+    use nodus_state::{Session, StreamState, Timeline};
+
+    let sdk = sdk_with(SyncConsent {
+        enabled: true,
+        telemetry_opt_in: true,
+    });
+    block_on(sdk.load_sync_consent()).expect("me answers");
+    sdk.adopt_session(Session {
+        host: "remote.test".to_owned(),
+        account_id: "self-1".to_owned(),
+        acct: "someone@remote.test".to_owned(),
+        scopes: vec!["read".to_owned(), "write".to_owned()],
+    });
+    sdk.dispatch(Command::CapabilitiesLoaded(Capabilities::from_parts(
+        "0.2.0",
+        &["batch".to_owned(), "events".to_owned()],
+    )));
+    sdk.dispatch(Command::StreamChanged(StreamState::Connected));
+
+    let (dm_status, conversation) = sample_dm_conversation();
+    sdk.dispatch(Command::AccountsUpserted {
+        accounts: vec![dm_status.account.clone()],
+    });
+    sdk.dispatch(Command::StatusesUpserted {
+        statuses: vec![dm_status],
+    });
+    sdk.adopt_items(
+        PageKind::Conversations,
+        PageItems::Conversations(vec![conversation]),
+        Some("conv-cursor".to_owned()),
+    );
+    sdk.adopt_page(
+        Timeline::Home,
+        None,
+        vec![status("home-1")],
+        Some("home-cursor".to_owned()),
+    );
+
+    let (account_feed, post_feed) = sample_feeds();
+    sdk.dispatch(Command::FeedLoaded(account_feed));
+    sdk.dispatch(Command::PostsLoaded {
+        feed: post_feed,
+        append: false,
+    });
+
+    block_on(sdk.sign_out()).expect("sign out succeeds");
+
+    let state = sdk.state();
+    assert_eq!(state.capabilities.get(), Capabilities::mastodon());
+    assert!(state.session.get().is_none());
+    assert!(state.sync.get().is_none());
+    assert_eq!(state.stream.get(), StreamState::Disconnected);
+    assert_eq!(state.feed.get().items, Vec::new());
+    assert_eq!(state.posts.get().items, Vec::new());
+    assert!(state.posts.get().feed_id.is_none());
+    assert!(state.timelines.with(std::collections::HashMap::is_empty));
+    assert!(sdk.read_status("dm-1").is_none());
+    assert!(state.statuses.with(std::collections::HashMap::is_empty));
+    assert!(
+        state
+            .pages
+            .with(|pages| pages.get(&PageKind::Conversations).is_none())
+    );
+    assert!(state.pages.with(std::collections::HashMap::is_empty));
+    assert!(sdk.read_account("acct-dm").is_none());
+    assert!(state.accounts.with(std::collections::HashMap::is_empty));
+}
