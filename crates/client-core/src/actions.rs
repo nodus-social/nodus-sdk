@@ -24,7 +24,7 @@ use crate::model::{
     Account, AdminAccount, AdminMeasure, Announcement, AnnouncementDraft, AuditEntry, Conversation,
     CustomEmoji, DomainAllow, DomainBlock, DomainSeverity, Draft, FeaturedTag, Filter, FilterDraft,
     HistoryEntry, InstanceInfo, Language, List, LocalId, MediaAttachment, ModerationAction, Page,
-    PageParams, Preferences, Relationship, Report, ReportState, Rule, ScheduledStatus,
+    PageParams, Poll, Preferences, Relationship, Report, ReportState, Rule, ScheduledStatus,
     SearchResults, Status,
 };
 
@@ -69,7 +69,7 @@ pub trait StatusActions {
         &self,
         poll_id: &str,
         choices: &[usize],
-    ) -> impl Future<Output = Result<Status, Self::Error>>;
+    ) -> impl Future<Output = Result<Poll, Self::Error>>;
 
     /// The edit history, oldest first.
     fn history(&self, id: &str) -> impl Future<Output = Result<Vec<HistoryEntry>, Self::Error>>;

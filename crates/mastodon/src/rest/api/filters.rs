@@ -28,8 +28,7 @@ impl<T: Transport> FilterActions for RestInstance<T> {
     async fn delete_filter(&self, id: &str) -> Result<()> {
         let url = self.url(&format!("/api/v2/filters/{id}"))?;
         // The body of a delete is empty, so it cannot be decoded as the deleted object.
-        let _: serde_json::Value = self.fetch(self.delete(url)).await?;
-        Ok(())
+        self.send_empty(self.delete(url)).await
     }
 }
 
@@ -41,7 +40,6 @@ fn draft_form(draft: &FilterDraft) -> Vec<(&'static str, String)> {
     let mut form = vec![
         ("title", draft.title.clone()),
         ("filter_action", draft.filter_action.as_str().to_owned()),
-        ("whole_word", draft.whole_word.to_string()),
     ];
     for context in &draft.context {
         form.push(("context[]", context.as_str().to_owned()));
@@ -51,6 +49,10 @@ fn draft_form(draft: &FilterDraft) -> Vec<(&'static str, String)> {
     }
     for keyword in &draft.keywords {
         form.push(("keywords_attributes[][keyword]", keyword.clone()));
+        form.push((
+            "keywords_attributes[][whole_word]",
+            draft.whole_word.to_string(),
+        ));
     }
     form
 }

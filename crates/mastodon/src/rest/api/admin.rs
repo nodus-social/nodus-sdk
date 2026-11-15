@@ -70,8 +70,7 @@ impl<T: Transport> AdminActions for RestInstance<T> {
     async fn delete_domain_block(&self, id: &str) -> Result<()> {
         let url = self.url(&format!("/api/v1/admin/domain_blocks/{id}"))?;
         // The body of a delete is empty, so it cannot be decoded as the removed block.
-        let _: serde_json::Value = self.fetch(self.delete(url)).await?;
-        Ok(())
+        self.send_empty(self.delete(url)).await
     }
 
     async fn measures(
@@ -130,7 +129,7 @@ impl<T: Transport> AdminActions for RestInstance<T> {
 
     async fn delete_domain_allow(&self, id: &str) -> Result<()> {
         let url = self.url(&format!("/api/v1/admin/domain_allows/{id}"))?;
-        self.fetch(self.delete(url)).await
+        self.send_empty(self.delete(url)).await
     }
 }
 
