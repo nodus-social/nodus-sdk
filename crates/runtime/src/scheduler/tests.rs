@@ -12,7 +12,8 @@ fn plan_at(
     stream: StreamPhase,
 ) -> Plan {
     let budget = Budget {
-        last_success,
+        last_timeline_success: last_success,
+        last_feed_success: last_success,
         last_attempt,
         failures,
         stream,
@@ -191,4 +192,75 @@ fn reconnect_stops_doubling_at_the_cap() {
             "failures={failures}"
         );
     }
+}
+
+#[test]
+fn recent_timeline_success_does_not_mask_stale_feed() {
+    let base = Instant::now();
+    let timeline_at = base + TIMELINE_STALE;
+    let now = base + FEED_STALE;
+
+    let budget = Budget {
+        last_timeline_success: Some(timeline_at),
+        last_feed_success: Some(base),
+        last_attempt: Some(timeline_at),
+        failures: 0,
+        stream: StreamPhase::Connected,
+    };
+    let plan = Scheduler::new().plan(now, &budget);
+
+    assert!(plan.load_timeline);
+    assert!(plan.refresh_feed);
+
+    // Even 10s after a timeline refresh, a feed older than FEED_STALE is still due.
+    let recent_timeline = base + FEED_STALE.saturating_sub(Duration::from_secs(10));
+    let just_feed_stale = Budget {
+        last_timeline_success: Some(recent_timeline),
+        last_feed_success: Some(base),
+        last_attempt: Some(recent_timeline),
+        failures: 0,
+        stream: StreamPhase::Connected,
+    };
+    let plan = Scheduler::new().plan(now, &just_feed_stale);
+    assert!(!plan.load_timeline);
+    assert!(plan.refresh_feed);
+}
+
+#[test]
+fn retry_backoff_gates_stale_loads_until_retry_in_elapses() {
+    let base = Instant::now();
+
+    // 2 failures -> retry_in = 8s. At +1s (past MIN_ATTEMPT_GAP), flags stay false.
+    let too_soon = plan_at(
+        base + MIN_ATTEMPT_GAP,
+        None,
+        Some(base),
+        2,
+        StreamPhase::Connected,
+    );
+    assert!(!too_soon.load_timeline);
+    assert!(!too_soon.refresh_feed);
+    assert_eq!(too_soon.retry_in, Some(Duration::from_secs(8)));
+
+    // At +7s, still inside 8s backoff.
+    let still_waiting = plan_at(
+        base + Duration::from_secs(7),
+        None,
+        Some(base),
+        2,
+        StreamPhase::Connected,
+    );
+    assert!(!still_waiting.load_timeline);
+    assert!(!still_waiting.refresh_feed);
+
+    // At +8s, backoff has elapsed and stale loads become due.
+    let ready = plan_at(
+        base + Duration::from_secs(8),
+        None,
+        Some(base),
+        2,
+        StreamPhase::Connected,
+    );
+    assert!(ready.load_timeline);
+    assert!(ready.refresh_feed);
 }

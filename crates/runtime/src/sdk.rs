@@ -369,18 +369,26 @@ where
     /// user did not ask for must not surface an error; `failed` marks the cycle for
     /// whoever wants to log it.
     pub async fn drive(&self, driver: &mut Driver, now: Instant) -> Drive {
-        let plan = driver.plan(now);
         let signed_in = self.state.session.with(Option::is_some);
         let mut report = Drive::default();
+        if !signed_in {
+            return report;
+        }
 
-        if plan.load_timeline && signed_in {
+        let plan = driver.plan(now);
+        let mut timeline_ok = false;
+        let mut feed_ok = false;
+
+        if plan.load_timeline {
             report.timeline = true;
             driver.record_attempt(now);
             if self
                 .load_timeline(TimelineRequest::Home, None, TIMELINE_PAGE)
                 .await
-                .is_err()
+                .is_ok()
             {
+                timeline_ok = true;
+            } else {
                 report.failed = true;
             }
         }
@@ -388,17 +396,15 @@ where
         if plan.refresh_feed {
             report.feed = true;
             driver.record_attempt(now);
-            if self.load_feed(None).await.is_err() {
+            if self.load_feed(None).await.is_ok() {
+                feed_ok = true;
+            } else {
                 report.failed = true;
             }
         }
 
         if !report.is_empty() {
-            if report.failed {
-                driver.record_failure();
-            } else {
-                driver.record_success(now);
-            }
+            driver.record_cycle(now, timeline_ok, feed_ok, report.failed);
         }
 
         report
@@ -664,10 +670,17 @@ where
             let fresh = self
                 .timeline_fetched_at(&request)
                 .is_some_and(|at| self.clock.now_unix_millis().saturating_sub(at) < ttl_ms);
-            let held = self.state.timelines.with(|timelines| {
+            let status_ids = self.state.timelines.with(|timelines| {
                 timelines
                     .get(&request.key())
-                    .is_some_and(|page| !page.status_ids.is_empty())
+                    .map(|page| page.status_ids.clone())
+            });
+            let held = status_ids.is_some_and(|ids| {
+                !ids.is_empty()
+                    && self
+                        .state
+                        .statuses
+                        .with(|statuses| ids.iter().all(|id| statuses.contains_key(id)))
             });
             if fresh && held {
                 return Ok(None);
@@ -798,12 +811,21 @@ where
     /// Failures are swallowed: a cold cache is not an error, and the network
     /// request that follows will fill it.
     pub async fn restore_home_timeline(&self, host: &str) {
-        let key = CacheKey::Timeline {
+        let statuses_key = CacheKey::Statuses {
+            host: host.to_owned(),
+        };
+        if let Ok(Some(bytes)) = self.persistence.load(&statuses_key).await {
+            if let Ok(statuses) = serde_json::from_slice::<Vec<Status>>(&bytes) {
+                self.upsert_entities(statuses, Vec::new());
+            }
+        }
+
+        let timeline_key = CacheKey::Timeline {
             host: host.to_owned(),
             which: Timeline::Home,
             tag: None,
         };
-        if let Ok(Some(bytes)) = self.persistence.load(&key).await {
+        if let Ok(Some(bytes)) = self.persistence.load(&timeline_key).await {
             if let Ok(page) = serde_json::from_slice::<TimelinePage>(&bytes) {
                 self.dispatch(Command::TimelineLoaded {
                     which: Timeline::Home,
@@ -822,11 +844,6 @@ where
         &self,
         host: &str,
     ) -> Result<(), SdkError<I::Error, D::Error>> {
-        let key = CacheKey::Timeline {
-            host: host.to_owned(),
-            which: Timeline::Home,
-            tag: None,
-        };
         let page = self
             .state
             .timelines
@@ -834,11 +851,36 @@ where
         let Some(page) = page else {
             return Ok(());
         };
-        let bytes = serde_json::to_vec(&page).map_err(|error| {
+        let statuses: Vec<Status> = self.state.statuses.with(|held| {
+            page.status_ids
+                .iter()
+                .filter_map(|id| held.get(id).cloned())
+                .collect()
+        });
+        let statuses_bytes = serde_json::to_vec(&statuses).map_err(|error| {
+            SdkError::Persistence(crate::error::PersistenceError::Serde(error.to_string()))
+        })?;
+        let page_bytes = serde_json::to_vec(&page).map_err(|error| {
             SdkError::Persistence(crate::error::PersistenceError::Serde(error.to_string()))
         })?;
         self.persistence
-            .store(&key, bytes)
+            .store(
+                &CacheKey::Statuses {
+                    host: host.to_owned(),
+                },
+                statuses_bytes,
+            )
+            .await
+            .map_err(SdkError::Persistence)?;
+        self.persistence
+            .store(
+                &CacheKey::Timeline {
+                    host: host.to_owned(),
+                    which: Timeline::Home,
+                    tag: None,
+                },
+                page_bytes,
+            )
             .await
             .map_err(SdkError::Persistence)
     }

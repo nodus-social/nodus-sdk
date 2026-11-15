@@ -94,14 +94,14 @@ pub fn status(value: Value) -> Option<Status> {
         favourites_count: favourites,
         reblogs_count: number(&value, "renoteCount"),
         replies_count: number(&value, "repliesCount"),
-        favourited: false,
+        favourited: value.get("myReaction").and_then(Value::as_str).is_some(),
         reblogged: false,
-        bookmarked: false,
+        bookmarked: boolean(&value, "isFavorited"),
         reblog: renote.map(Box::new),
         in_reply_to_id: string(&value, "replyId"),
         emojis,
         url: value.get("url").and_then(Value::as_str).map(str::to_owned),
-        sensitive: files.iter().any(|media| media.description.is_some()),
+        sensitive: files.iter().any(|media| media.sensitive),
         spoiler_text: cw.to_owned(),
         language: None,
         media_attachments: files,
@@ -173,24 +173,32 @@ pub fn note_html(text: &str, emojis: &[CustomEmoji]) -> String {
 
 fn text_html(text: &str, emojis: &[CustomEmoji]) -> String {
     let mut html = String::with_capacity(text.len() + 16);
-    for token in text.split_whitespace() {
-        if !html.is_empty() {
-            html.push(' ');
+    for (line_index, line) in text.split('\n').enumerate() {
+        if line_index > 0 {
+            html.push_str("<br>");
         }
-        let shortcode = token.trim_matches(':');
-        if token.starts_with(':') && token.ends_with(':') {
-            if let Some(emoji) = emojis.iter().find(|emoji| emoji.shortcode == shortcode) {
-                let escaped_shortcode = escape(shortcode);
-                html.push_str(&format!(
-                    "<img class=\"emoji\" alt=\":{escaped_shortcode}:\" title=\":{escaped_shortcode}:\" src=\"{}\">",
-                    escape(&emoji.url)
-                ));
-                continue;
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        for (token_index, token) in line.split_whitespace().enumerate() {
+            if token_index > 0 {
+                html.push(' ');
             }
+            if let Some(shortcode) = token
+                .strip_prefix(':')
+                .and_then(|rest| rest.strip_suffix(':'))
+            {
+                if let Some(emoji) = emojis.iter().find(|emoji| emoji.shortcode == shortcode) {
+                    let escaped_shortcode = escape(shortcode);
+                    html.push_str(&format!(
+                        "<img class=\"emoji\" alt=\":{escaped_shortcode}:\" title=\":{escaped_shortcode}:\" src=\"{}\">",
+                        escape(&emoji.url)
+                    ));
+                    continue;
+                }
+            }
+            html.push_str(&escape(token));
         }
-        html.push_str(&escape(token));
     }
-    html.replace('\n', "<br>")
+    html
 }
 
 fn media(value: &Value) -> Option<MediaAttachment> {
@@ -227,51 +235,198 @@ fn media(value: &Value) -> Option<MediaAttachment> {
             .and_then(|properties| properties.get("height"))
             .and_then(Value::as_u64)
             .map(|height| height as u32),
-        sensitive: value
-            .get("sensitive")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        sensitive: boolean(value, "isSensitive"),
         processing_state: None,
         processing_progress: None,
     })
 }
 
 fn poll(value: Value) -> Option<Poll> {
+    poll_with_now(value, now_unix_millis())
+}
+
+fn poll_with_now(value: Value, now_ms: i64) -> Option<Poll> {
     let choices = value.get("choices")?.as_array()?;
-    let options: Vec<PollOption> = choices
-        .iter()
-        .filter_map(|choice| {
-            Some(PollOption {
-                title: choice.get("text")?.as_str()?.to_owned(),
-                votes_count: choice.get("votes").and_then(Value::as_u64),
-            })
-        })
-        .collect();
+    let mut options = Vec::with_capacity(choices.len());
+    let mut own_votes = Vec::new();
+    for choice in choices {
+        let Some(title) = choice.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let index = options.len();
+        options.push(PollOption {
+            title: title.to_owned(),
+            votes_count: choice.get("votes").and_then(Value::as_u64),
+        });
+        if boolean(choice, "isVoted") {
+            own_votes.push(index);
+        }
+    }
     let votes_count = options
         .iter()
         .filter_map(|option| option.votes_count)
         .sum::<u64>();
+    let expires_at = string(&value, "expiresAt");
+    let expired = value
+        .get("expired")
+        .and_then(Value::as_bool)
+        .unwrap_or_else(|| {
+            expires_at
+                .as_deref()
+                .and_then(parse_iso8601_millis)
+                .is_some_and(|at_ms| at_ms <= now_ms)
+        });
     Some(Poll {
         id: String::new(),
-        expires_at: value
-            .get("expiresAt")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        expired: value
-            .get("expiresAt")
-            .and_then(Value::as_str)
-            .is_some_and(|at| at < "1970-01-01"),
-        multiple: value
-            .get("multiple")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        expires_at,
+        expired,
+        multiple: boolean(&value, "multiple"),
         votes_count,
         voters_count: None,
-        voted: false,
-        own_votes: Vec::new(),
+        voted: !own_votes.is_empty(),
+        own_votes,
         options,
         emojis: Vec::new(),
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn now_unix_millis() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let elapsed = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn now_unix_millis() -> i64 {
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "epoch milliseconds fit i64 for the next 292 million years"
+    )]
+    {
+        js_sys::Date::now() as i64
+    }
+}
+
+fn parse_iso8601_millis(raw: &str) -> Option<i64> {
+    let bytes = raw.as_bytes();
+    if bytes.len() < 20 {
+        return None;
+    }
+    let year = parse_digits(bytes.get(0..4)?)?;
+    if bytes[4] != b'-' {
+        return None;
+    }
+    let month = parse_digits(bytes.get(5..7)?)?;
+    if bytes[7] != b'-' {
+        return None;
+    }
+    let day = parse_digits(bytes.get(8..10)?)?;
+    if !matches!(bytes[10], b'T' | b't' | b' ') {
+        return None;
+    }
+    let hour = parse_digits(bytes.get(11..13)?)?;
+    if bytes[13] != b':' {
+        return None;
+    }
+    let minute = parse_digits(bytes.get(14..16)?)?;
+    if bytes[16] != b':' {
+        return None;
+    }
+    let second = parse_digits(bytes.get(17..19)?)?;
+
+    if !(1..=12).contains(&month)
+        || !(1..=days_in_month(year, month)).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+
+    let mut pos = 19;
+    let mut frac_ms = 0_i64;
+    if bytes.get(pos) == Some(&b'.') {
+        pos += 1;
+        let frac_start = pos;
+        let mut scale = 100_i64;
+        while let Some(&b) = bytes.get(pos) {
+            if !b.is_ascii_digit() {
+                break;
+            }
+            if scale > 0 {
+                frac_ms += i64::from(b - b'0') * scale;
+                scale /= 10;
+            }
+            pos += 1;
+        }
+        if pos == frac_start {
+            return None;
+        }
+    }
+
+    let tz_offset_secs = match bytes.get(pos)? {
+        b'Z' | b'z' => {
+            pos += 1;
+            0_i64
+        }
+        sign @ (b'+' | b'-') => {
+            pos += 1;
+            let tz_hour = parse_digits(bytes.get(pos..pos + 2)?)?;
+            pos += 2;
+            if bytes.get(pos) == Some(&b':') {
+                pos += 1;
+            }
+            let tz_min = parse_digits(bytes.get(pos..pos + 2)?)?;
+            pos += 2;
+            if tz_hour > 23 || tz_min > 59 {
+                return None;
+            }
+            let offset = tz_hour * 3600 + tz_min * 60;
+            if *sign == b'-' { -offset } else { offset }
+        }
+        _ => return None,
+    };
+
+    if pos != bytes.len() {
+        return None;
+    }
+
+    let days = days_from_civil(year, month, day);
+    let secs = days * 86_400 + hour * 3600 + minute * 60 + second - tz_offset_secs;
+    Some(secs * 1000 + frac_ms)
+}
+
+fn parse_digits(bytes: &[u8]) -> Option<i64> {
+    let mut value = 0_i64;
+    for &b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        value = value * 10 + i64::from(b - b'0');
+    }
+    Some(value)
+}
+
+fn days_in_month(year: i64, month: i64) -> i64 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if (year % 4 == 0 && year % 100 != 0) || year % 400 == 0 => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let y = year - i64::from(month <= 2);
+    let era = y.div_euclid(400);
+    let yoe = y.rem_euclid(400);
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
 }
 
 pub fn visibility_out(visibility: Visibility) -> &'static str {
@@ -438,5 +593,156 @@ mod tests {
             html.contains(r#"alt=":&lt;script&gt;:""#),
             "alt must escape angle brackets, got: {html}"
         );
+    }
+
+    #[test]
+    fn note_html_preserves_line_breaks_and_renders_emojis() {
+        let emojis = vec![CustomEmoji {
+            shortcode: "blob".to_owned(),
+            url: "https://misskey.example/blob.png".to_owned(),
+            static_url: None,
+        }];
+        let html = note_html("first line\nsecond :blob: line\n\nthird line", &emojis);
+        assert_eq!(
+            html,
+            "first line<br>second <img class=\"emoji\" alt=\":blob:\" title=\":blob:\" src=\"https://misskey.example/blob.png\"> line<br><br>third line"
+        );
+        assert_eq!(note_html("a\r\nb", &[]), "a<br>b");
+        assert_eq!(note_html("\nhello", &[]), "<br>hello");
+    }
+
+    #[test]
+    fn alt_text_does_not_mark_status_sensitive_and_reads_is_sensitive() {
+        let base_user = serde_json::json!({
+            "id": "u1",
+            "username": "alice"
+        });
+        let alt_only_note = serde_json::json!({
+            "id": "n1",
+            "createdAt": "2026-11-12T03:00:00.000Z",
+            "text": "photo with alt",
+            "user": base_user,
+            "files": [{
+                "id": "f1",
+                "type": "image",
+                "url": "https://misskey.example/f1.png",
+                "comment": "A cat sitting on a keyboard",
+                "isSensitive": false
+            }]
+        });
+        let alt_status = status(alt_only_note).expect("status");
+        assert_eq!(
+            alt_status.media_attachments[0].description.as_deref(),
+            Some("A cat sitting on a keyboard")
+        );
+        assert!(!alt_status.media_attachments[0].sensitive);
+        assert!(!alt_status.sensitive);
+
+        let nsfw_note = serde_json::json!({
+            "id": "n2",
+            "createdAt": "2026-11-12T03:00:00.000Z",
+            "text": "sensitive photo",
+            "user": base_user,
+            "files": [{
+                "id": "f2",
+                "type": "image",
+                "url": "https://misskey.example/f2.png",
+                "isSensitive": true
+            }]
+        });
+        let nsfw_status = status(nsfw_note).expect("status");
+        assert!(nsfw_status.media_attachments[0].sensitive);
+        assert!(nsfw_status.sensitive);
+    }
+
+    #[test]
+    fn status_maps_my_reaction_and_is_favorited() {
+        let note = serde_json::json!({
+            "id": "n1",
+            "createdAt": "2026-11-12T03:00:00.000Z",
+            "text": "hi",
+            "user": { "id": "u1", "username": "alice" },
+            "myReaction": "❤️",
+            "isFavorited": true
+        });
+        let mapped = status(note).expect("status");
+        assert!(mapped.favourited);
+        assert!(mapped.bookmarked);
+        assert!(!mapped.reblogged);
+    }
+
+    #[test]
+    fn poll_checks_expiry_and_maps_own_votes() {
+        let expired_note = serde_json::json!({
+            "id": "n1",
+            "createdAt": "2020-01-01T00:00:00.000Z",
+            "text": "old poll",
+            "user": { "id": "u1", "username": "alice" },
+            "poll": {
+                "multiple": true,
+                "expiresAt": "2020-01-02T00:00:00.000Z",
+                "choices": [
+                    { "text": "A", "votes": 3, "isVoted": false },
+                    { "text": "B", "votes": 5, "isVoted": true }
+                ]
+            }
+        });
+        let expired_poll = status(expired_note).expect("status").poll.expect("poll");
+        assert!(expired_poll.expired);
+        assert!(expired_poll.multiple);
+        assert!(expired_poll.voted);
+        assert_eq!(expired_poll.own_votes, vec![1]);
+        assert_eq!(expired_poll.votes_count, 8);
+
+        let open_note = serde_json::json!({
+            "id": "n2",
+            "createdAt": "2026-11-12T00:00:00.000Z",
+            "text": "open poll",
+            "user": { "id": "u1", "username": "alice" },
+            "poll": {
+                "multiple": false,
+                "expiresAt": "2099-01-01T00:00:00.000Z",
+                "choices": [
+                    { "text": "Yes", "votes": 1, "isVoted": false },
+                    { "text": "No", "votes": 0, "isVoted": false }
+                ]
+            }
+        });
+        let open_poll = status(open_note).expect("status").poll.expect("poll");
+        assert!(!open_poll.expired);
+        assert!(!open_poll.voted);
+        assert_eq!(open_poll.own_votes, Vec::<usize>::new());
+    }
+
+    #[test]
+    fn poll_with_now_handles_timezones_boundaries_and_null_expiry() {
+        let base_ms = parse_iso8601_millis("2026-11-15T12:00:00.000Z").expect("valid timestamp");
+        assert_eq!(
+            parse_iso8601_millis("2026-11-15T21:00:00+09:00"),
+            Some(base_ms)
+        );
+        assert_eq!(
+            parse_iso8601_millis("2026-11-15T12:00:00.5Z"),
+            Some(base_ms + 500)
+        );
+        assert_eq!(parse_iso8601_millis("2026-02-29T00:00:00Z"), None);
+        assert!(parse_iso8601_millis("2024-02-29T00:00:00Z").is_some());
+
+        let poll_json = serde_json::json!({
+            "expiresAt": "2026-11-15T21:00:00+09:00",
+            "choices": [{ "text": "A", "votes": 1 }]
+        });
+        assert!(
+            !poll_with_now(poll_json.clone(), base_ms - 1)
+                .expect("poll")
+                .expired
+        );
+        assert!(poll_with_now(poll_json, base_ms).expect("poll").expired);
+
+        let timeless = serde_json::json!({
+            "expiresAt": null,
+            "choices": [{ "text": "A", "votes": 0 }]
+        });
+        assert!(!poll_with_now(timeless, base_ms).expect("poll").expired);
     }
 }
