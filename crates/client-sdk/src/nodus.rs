@@ -3,6 +3,8 @@
 //! This is the transport, not a second model: responses stay JSON because the batch
 //! vocabulary is the server's, and a client decodes only the value it asked for.
 
+use core::fmt;
+
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,11 +41,21 @@ pub struct SyncDiff {
 }
 
 /// The Nodus-native client.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NodusClient {
     base: Url,
     token: String,
     http: Client,
+}
+
+impl fmt::Debug for NodusClient {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NodusClient")
+            .field("base", &self.base.as_str())
+            .field("token", &"<redacted>")
+            .finish_non_exhaustive()
+    }
 }
 
 impl NodusClient {
@@ -163,5 +175,14 @@ mod tests {
         .expect("diff");
         assert_eq!(diff.root, "abc");
         assert_eq!(diff.status, "diff");
+    }
+
+    #[test]
+    fn debug_redacts_the_bearer_token() {
+        let instance = Instance::parse("https://example.social").expect("instance");
+        let client = NodusClient::new(&instance, "super-secret-bearer-token");
+        let rendered = format!("{client:?}");
+        assert!(!rendered.contains("super-secret-bearer-token"));
+        assert!(rendered.contains("<redacted>"));
     }
 }
