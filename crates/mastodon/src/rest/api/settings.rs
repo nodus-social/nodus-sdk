@@ -22,7 +22,6 @@ impl<T: Transport> SettingsActions for RestInstance<T> {
         let url = self.url_segments(&["api", "v1", "announcements", id, "dismiss"])?;
         // Dismissing answers 200 with an empty body; decoding it as an object would
         // make a successful dismissal look like a failure.
-        let _: serde_json::Value = self.fetch(self.post(url)).await?;
-        Ok(())
+        self.send_empty(self.post(url)).await
     }
 }

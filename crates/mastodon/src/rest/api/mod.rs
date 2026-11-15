@@ -8,6 +8,8 @@ mod meta;
 mod registration;
 mod schedule;
 mod settings;
+#[cfg(test)]
+mod tests;
 
 use crate::api::InstanceApi;
 use crate::model::{
@@ -112,59 +114,80 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
 
     async fn post_status(&self, draft: &Draft) -> Result<Status> {
         let url = self.url("/api/v1/statuses")?;
-        let mut form: Vec<(&str, String)> = vec![
-            ("status", draft.text.clone()),
-            ("visibility", draft.visibility.as_str().to_owned()),
-        ];
-        if let Some(reply_to) = &draft.in_reply_to_id {
-            form.push(("in_reply_to_id", reply_to.clone()));
-        }
-        for media_id in &draft.media_ids {
-            form.push(("media_ids[]", media_id.clone()));
-        }
-        if !draft.spoiler_text.is_empty() {
-            form.push(("spoiler_text", draft.spoiler_text.clone()));
-        }
-        if let Some(language) = draft.language.as_ref() {
-            form.push(("language", language.clone()));
-        }
-        if draft.sensitive {
-            form.push(("sensitive", "true".to_owned()));
-        }
-        if let Some(poll) = &draft.poll {
-            // The wire shape is `poll[options][]`, repeated; an option that is only spaces
-            // is dropped here rather than sent, because the instance rejects the whole post.
-            for option in poll
-                .options
-                .iter()
-                .filter(|option| !option.trim().is_empty())
-            {
-                form.push(("poll[options][]", option.clone()));
-            }
-            form.push(("poll[expires_in]", poll.expires_in.to_string()));
-            if poll.multiple {
-                form.push(("poll[multiple]", "true".to_owned()));
-            }
-            if poll.hide_totals {
-                form.push(("poll[hide_totals]", "true".to_owned()));
-            }
-        }
-        let mut request = self.post_form(url, &form);
-        // Idempotency is what stops a retried compose from posting twice; a draft
-        // without a key is a caller bug, not something to paper over here.
-        if let Some(key) = &draft.idempotency_key {
-            request
-                .headers
-                .push(("Idempotency-Key".to_owned(), key.clone()));
-        }
+        let form = status_form(draft, false);
+        let request = attach_idempotency_key(self.post_form(url, &form), draft);
         self.fetch(request).await
     }
 
     async fn delete_status(&self, id: &str) -> Result<()> {
         let url = self.url_segments(&["api", "v1", "statuses", id])?;
-        let _: serde_json::Value = self.fetch(self.delete(url)).await?;
-        Ok(())
+        self.send_empty(self.delete(url)).await
     }
+}
+
+/// Builds the form fields for posting, scheduling, or editing a status.
+///
+/// When `for_edit` is `true`, `spoiler_text` and `sensitive` are always emitted even
+/// when empty or `false` so an edit can clear a content warning or unmark sensitivity,
+/// and `in_reply_to_id` is omitted because `PUT /api/v1/statuses/:id` does not accept it.
+pub(super) fn status_form(draft: &Draft, for_edit: bool) -> Vec<(&'static str, String)> {
+    let mut form: Vec<(&'static str, String)> = vec![
+        ("status", draft.text.clone()),
+        ("visibility", draft.visibility.as_str().to_owned()),
+    ];
+    if !for_edit {
+        if let Some(reply_to) = &draft.in_reply_to_id {
+            form.push(("in_reply_to_id", reply_to.clone()));
+        }
+    }
+    for media_id in &draft.media_ids {
+        form.push(("media_ids[]", media_id.clone()));
+    }
+    if for_edit || !draft.spoiler_text.is_empty() {
+        form.push(("spoiler_text", draft.spoiler_text.clone()));
+    }
+    if let Some(language) = draft.language.as_ref() {
+        form.push(("language", language.clone()));
+    }
+    if for_edit {
+        form.push(("sensitive", draft.sensitive.to_string()));
+    } else if draft.sensitive {
+        form.push(("sensitive", "true".to_owned()));
+    }
+    if let Some(poll) = &draft.poll {
+        // The wire shape is `poll[options][]`, repeated; an option that is only spaces
+        // is dropped here rather than sent, because the instance rejects the whole post.
+        for option in poll
+            .options
+            .iter()
+            .filter(|option| !option.trim().is_empty())
+        {
+            form.push(("poll[options][]", option.clone()));
+        }
+        form.push(("poll[expires_in]", poll.expires_in.to_string()));
+        if poll.multiple {
+            form.push(("poll[multiple]", "true".to_owned()));
+        }
+        if poll.hide_totals {
+            form.push(("poll[hide_totals]", "true".to_owned()));
+        }
+    }
+    form
+}
+
+/// Attaches the draft's `Idempotency-Key` header if present.
+pub(super) fn attach_idempotency_key(
+    mut request: crate::rest::HttpRequest,
+    draft: &Draft,
+) -> crate::rest::HttpRequest {
+    // Idempotency is what stops a retried compose from posting twice; a draft
+    // without a key is a caller bug, not something to paper over here.
+    if let Some(key) = &draft.idempotency_key {
+        request
+            .headers
+            .push(("Idempotency-Key".to_owned(), key.clone()));
+    }
+    request
 }
 
 #[cfg(feature = "native")]
@@ -196,7 +219,7 @@ mod sync_impl {
 }
 
 #[cfg(test)]
-mod tests {
+mod url_tests {
     use core::cell::RefCell;
     use std::rc::Rc;
 

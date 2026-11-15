@@ -113,11 +113,13 @@ impl DwellTracker {
             .count()
     }
 
-    /// Removes every item on screen without reporting it.
+    /// Removes every item on screen, queued impression, and active feed without reporting it.
     ///
     /// For a sign-out, where the rows would name a user who no longer exists.
     pub fn discard(&mut self) {
+        self.feed_id = None;
         self.shown.clear();
+        self.pending.clear();
     }
 
     /// Drains everything queued into batches the server accepts, oldest first.
@@ -289,6 +291,25 @@ mod tests {
         tracker.discard();
         assert_eq!(tracker.shown(), 0);
         assert_eq!(tracker.pending(), 0);
+    }
+
+    #[test]
+    fn discard_clears_pending_impressions_and_active_feed() {
+        let mut tracker = tracker();
+        tracker.begin(7, 0);
+        assert!(tracker.finish(7, 1_500, "2026-11-07T00:00:01Z"));
+        assert_eq!(tracker.pending(), 1);
+
+        tracker.discard();
+
+        assert_eq!(tracker.shown(), 0);
+        assert_eq!(tracker.pending(), 0);
+        assert_eq!(tracker.take_batches(100), Vec::new());
+
+        // Subsequent begin() without set_feed() must not reuse the signed-out feed_id.
+        tracker.begin(8, 2_000);
+        assert_eq!(tracker.shown(), 0);
+        assert!(!tracker.finish(8, 3_000, "2026-11-07T00:00:03Z"));
     }
 
     #[test]

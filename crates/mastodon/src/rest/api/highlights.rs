@@ -23,8 +23,7 @@ impl<T: Transport> HighlightActions for RestInstance<T> {
         let url = self.url_segments(&["api", "v1", "featured_tags", id])?;
         // The answer is an empty body, so decoding it as an object would turn a
         // successful removal into a parse failure.
-        let _: serde_json::Value = self.fetch(self.delete(url)).await?;
-        Ok(())
+        self.send_empty(self.delete(url)).await
     }
 
     async fn rules(&self) -> Result<Vec<Rule>> {

@@ -15,8 +15,8 @@ use nodus_protocol::Capabilities;
 use nodus_shared::{AccountFeed, EventBatch, PostFeed};
 use nodus_state::page::{PageEntry, PageItems, PageKind};
 use nodus_state::{
-    AppState, Command, Discovery, FeedState, Session, StreamState, SyncConsent, Timeline,
-    TimelinePage, TimelineRequest,
+    AppState, Command, Discovery, FeedState, PostFeedState, Session, StreamState, SyncConsent,
+    Timeline, TimelinePage, TimelineRequest,
 };
 
 use nodus_client_core::model::Conversation;
@@ -200,14 +200,19 @@ where
                 self.state.capabilities.set(capabilities);
             }
             Command::SignedOut => {
-                // Consent belongs to the account we just forgot.
+                // Consent and capabilities belong to the session we just forgot.
+                self.state.capabilities.set(Capabilities::mastodon());
                 self.state.sync.set(None);
                 self.state.session.set(None);
                 self.state.stream.set(StreamState::Disconnected);
                 self.state.feed.set(FeedState::default());
-                // Replace the map rather than clearing it in place, so subscribers
+                self.state.posts.set(PostFeedState::default());
+                // Replace the maps rather than clearing them in place, so subscribers
                 // see exactly one notification.
                 self.state.timelines.set(std::collections::HashMap::new());
+                self.state.statuses.set(std::collections::HashMap::new());
+                self.state.pages.set(std::collections::HashMap::new());
+                self.state.accounts.set(std::collections::HashMap::new());
             }
             Command::ConversationsUpserted { items } => self.merge_conversations(items),
 

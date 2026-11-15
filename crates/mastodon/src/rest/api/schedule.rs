@@ -15,31 +15,16 @@ impl<T: Transport> ScheduleActions for RestInstance<T> {
 
     async fn schedule(&self, draft: &Draft, at: &str) -> Result<ScheduledStatus> {
         let url = self.url("/api/v1/statuses")?;
-        let mut form = vec![
-            ("status", draft.text.clone()),
-            ("visibility", draft.visibility.as_str().to_owned()),
-        ];
-        if let Some(parent) = draft.in_reply_to_id.as_ref() {
-            form.push(("in_reply_to_id", parent.clone()));
-        }
-        for media in &draft.media_ids {
-            form.push(("media_ids[]", media.clone()));
-        }
-        if !draft.spoiler_text.is_empty() {
-            form.push(("spoiler_text", draft.spoiler_text.clone()));
-        }
-        if draft.sensitive {
-            form.push(("sensitive", "true".to_owned()));
-        }
+        let mut form = super::status_form(draft, false);
         form.push(("scheduled_at", at.to_owned()));
-        self.fetch(self.post_form(url, &form)).await
+        let request = super::attach_idempotency_key(self.post_form(url, &form), draft);
+        self.fetch(request).await
     }
 
     async fn cancel_scheduled(&self, id: &str) -> Result<()> {
         let url = self.url_segments(&["api", "v1", "scheduled_statuses", id])?;
         // The answer is an empty body; decoding it as an object would make a successful
         // cancellation look like a failure.
-        let _: serde_json::Value = self.fetch(self.delete(url)).await?;
-        Ok(())
+        self.send_empty(self.delete(url)).await
     }
 }

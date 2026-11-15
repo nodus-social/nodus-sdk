@@ -9,7 +9,7 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use crate::actions::{AccountActions, Browse, MediaActions, Search, StatusActions};
 use crate::model::{
     Account, Conversation, Draft, HistoryEntry, List, LocalId, MediaAttachment, Page, PageParams,
-    Relationship, SearchResults, Status,
+    Poll, Relationship, SearchResults, Status,
 };
 use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
@@ -22,16 +22,6 @@ async fn status_verb<T: Transport>(
 ) -> Result<Status> {
     let url = client.url_segments(&["api", "v1", "statuses", id, verb])?;
     client.fetch(client.post(url)).await
-}
-
-/// Runs a segmented POST that answers with nothing worth reading.
-async fn post_segments_quiet<T: Transport>(
-    client: &RestInstance<T>,
-    segments: &[&str],
-) -> Result<()> {
-    let url = client.url_segments(segments)?;
-    let _: serde_json::Value = client.fetch(client.post(url)).await?;
-    Ok(())
 }
 
 impl<T: Transport> StatusActions for RestInstance<T> {
@@ -71,28 +61,17 @@ impl<T: Transport> StatusActions for RestInstance<T> {
 
     async fn edit_status(&self, id: &str, draft: &Draft) -> Result<Status> {
         let url = self.url_segments(&["api", "v1", "statuses", id])?;
-        let mut form: Vec<(&str, String)> = vec![
-            ("status", draft.text.clone()),
-            ("visibility", draft.visibility.as_str().to_owned()),
-        ];
-        if !draft.spoiler_text.is_empty() {
-            form.push(("spoiler_text", draft.spoiler_text.clone()));
-        }
-        if draft.sensitive {
-            form.push(("sensitive", "true".to_owned()));
-        }
+        let form = super::status_form(draft, true);
         self.fetch(self.put_form(url, &form)).await
     }
 
-    async fn vote(&self, poll_id: &str, choices: &[usize]) -> Result<Status> {
+    async fn vote(&self, poll_id: &str, choices: &[usize]) -> Result<Poll> {
         let url = self.url_segments(&["api", "v1", "polls", poll_id, "votes"])?;
         let form: Vec<(&str, String)> = choices
             .iter()
             .map(|choice| ("choices[]", choice.to_string()))
             .collect();
-        let _: serde_json::Value = self.fetch(self.post_form(url, &form)).await?;
-        let url = self.url_segments(&["api", "v1", "polls", poll_id])?;
-        self.fetch(self.get(url)).await
+        self.fetch(self.post_form(url, &form)).await
     }
 
     async fn history(&self, id: &str) -> Result<Vec<HistoryEntry>> {
@@ -163,7 +142,7 @@ impl<T: Transport> AccountActions for RestInstance<T> {
 
     async fn reject_follow_request(&self, id: &LocalId) -> Result<()> {
         let url = self.url_segments(&["api", "v1", "follow_requests", &id.0, "reject"])?;
-        self.fetch(self.post(url)).await
+        self.send_empty(self.post(url)).await
     }
 
     async fn mutes(&self, params: PageParams) -> Result<Page<Account>> {
@@ -177,7 +156,7 @@ impl<T: Transport> AccountActions for RestInstance<T> {
     }
 
     async fn update_profile(&self, update: &crate::model::ProfileUpdate) -> Result<Account> {
-        let mut form: Vec<(&str, String)> = Vec::with_capacity(3);
+        let mut form: Vec<(&str, String)> = Vec::with_capacity(5);
         if let Some(display_name) = &update.display_name {
             form.push(("display_name", display_name.clone()));
         }
@@ -186,6 +165,12 @@ impl<T: Transport> AccountActions for RestInstance<T> {
         }
         if let Some(locked) = update.locked {
             form.push(("locked", locked.to_string()));
+        }
+        if let Some(bot) = update.bot {
+            form.push(("bot", bot.to_string()));
+        }
+        if let Some(discoverable) = update.discoverable {
+            form.push(("discoverable", discoverable.to_string()));
         }
         let url = self.url("/api/v1/accounts/update_credentials")?;
         self.fetch(self.patch_form(url, &form)).await
@@ -352,7 +337,8 @@ impl<T: Transport> Browse for RestInstance<T> {
     }
 
     async fn mark_conversation_read(&self, id: &str) -> Result<()> {
-        post_segments_quiet(self, &["api", "v1", "conversations", id, "read"]).await
+        let url = self.url_segments(&["api", "v1", "conversations", id, "read"])?;
+        self.send_empty(self.post(url)).await
     }
 
     async fn directory(&self, local_only: bool, offset: u32) -> Result<Vec<Account>> {
@@ -397,8 +383,7 @@ impl<T: Transport> Browse for RestInstance<T> {
 
     async fn delete_list(&self, id: &str) -> Result<()> {
         let url = self.url_segments(&["api", "v1", "lists", id])?;
-        let _: serde_json::Value = self.fetch(self.delete(url)).await?;
-        Ok(())
+        self.send_empty(self.delete(url)).await
     }
 
     async fn add_to_list(&self, list_id: &str, accounts: &[LocalId]) -> Result<()> {
@@ -433,8 +418,7 @@ impl<T: Transport> RestInstance<T> {
         } else {
             self.delete_form(url, &form)
         };
-        let _: serde_json::Value = self.fetch(request).await?;
-        Ok(())
+        self.send_empty(request).await
     }
 }
 
