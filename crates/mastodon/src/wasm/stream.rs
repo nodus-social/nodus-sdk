@@ -1,6 +1,5 @@
-//! The streaming socket: the `wss://` URL and the frames it delivers.
+//! The streaming socket: the `wss://`/`ws://` URL and the frames it delivers.
 
-use url::Url;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast, JsValue};
 use web_sys::{BinaryType, MessageEvent, WebSocket};
@@ -11,15 +10,6 @@ use crate::rest::RestInstance;
 use crate::wasm::client::{ActiveStream, GlooTransport};
 use crate::{Error, Result};
 
-/// The wire spelling of a streaming timeline.
-const fn stream_name(kind: StreamKind) -> &'static str {
-    match kind {
-        StreamKind::User => "user",
-        StreamKind::Local => "local",
-        StreamKind::Federated => "federated",
-    }
-}
-
 impl Streaming for RestInstance<GlooTransport> {
     type Error = Error;
 
@@ -29,24 +19,6 @@ impl Streaming for RestInstance<GlooTransport> {
 }
 
 impl RestInstance<GlooTransport> {
-    /// The `wss://` URL for a streaming timeline.
-    ///
-    /// The token rides in the query string because a browser `WebSocket` cannot
-    /// send headers; this is the one place the token is written into a URL, and
-    /// no error or log line in this module ever includes that query string.
-    fn stream_url(&self, kind: StreamKind) -> Result<Url> {
-        let mut url = self.url("/api/v1/streaming")?;
-        url.set_scheme("wss").map_err(|()| {
-            Error::Transport("/api/v1/streaming: the instance URL has no websocket form".to_owned())
-        })?;
-        {
-            let mut query = url.query_pairs_mut();
-            query.append_pair("stream", stream_name(kind));
-            query.append_pair("access_token", self.token().expose());
-        }
-        Ok(url)
-    }
-
     /// Opens the streaming socket and registers it.
     ///
     /// Kept out of [`Streaming::subscribe`] so that method can stay a plain

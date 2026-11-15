@@ -81,9 +81,13 @@ pub struct Instance {
 impl Instance {
     /// Parse a host or URL into an instance, defaulting to `https`.
     ///
+    /// Only `https` is accepted for remote instances; `http` is accepted only
+    /// for loopback hosts (`localhost`, `*.localhost`, `127.0.0.0/8`, `::1`).
+    ///
     /// # Errors
     ///
-    /// Returns [`Error::Transport`] when the input is not a usable URL.
+    /// Returns [`Error::Transport`] when the input is not a usable `https` (or
+    /// loopback `http`) URL.
     pub fn parse(input: &str) -> Result<Self> {
         let trimmed = input.trim();
         let candidate = if trimmed.contains("://") {
@@ -92,6 +96,93 @@ impl Instance {
             format!("https://{trimmed}")
         };
         let base = Url::parse(&candidate).map_err(|e| Error::Transport(e.to_string()))?;
-        Ok(Self { base })
+        match base.scheme() {
+            "https" if base.has_host() => Ok(Self { base }),
+            "http" if is_loopback(&base) => Ok(Self { base }),
+            "http" => Err(Error::Transport(
+                "plain http is only allowed for loopback hosts".to_owned(),
+            )),
+            scheme => Err(Error::Transport(format!(
+                "unsupported instance URL scheme: {scheme}"
+            ))),
+        }
+    }
+}
+
+fn is_loopback(url: &Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(domain)) => {
+            domain.eq_ignore_ascii_case("localhost") || domain.ends_with(".localhost")
+        }
+        Some(url::Host::Ipv4(addr)) => addr.is_loopback(),
+        Some(url::Host::Ipv6(addr)) => addr.is_loopback(),
+        None => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instance_parse_accepts_https_and_loopback_http() {
+        assert_eq!(
+            Instance::parse("mastodon.example").unwrap().base.as_str(),
+            "https://mastodon.example/"
+        );
+        assert_eq!(
+            Instance::parse("https://mastodon.example/sub")
+                .unwrap()
+                .base
+                .as_str(),
+            "https://mastodon.example/sub"
+        );
+        assert_eq!(
+            Instance::parse("http://localhost:3000")
+                .unwrap()
+                .base
+                .as_str(),
+            "http://localhost:3000/"
+        );
+        assert_eq!(
+            Instance::parse("http://127.0.0.1:8080")
+                .unwrap()
+                .base
+                .as_str(),
+            "http://127.0.0.1:8080/"
+        );
+        assert_eq!(
+            Instance::parse("http://[::1]:8080").unwrap().base.as_str(),
+            "http://[::1]:8080/"
+        );
+        assert_eq!(
+            Instance::parse("http://dev.localhost:3000")
+                .unwrap()
+                .base
+                .as_str(),
+            "http://dev.localhost:3000/"
+        );
+    }
+
+    #[test]
+    fn instance_parse_rejects_unsafe_schemes_and_remote_http() {
+        for bad in [
+            "http://mastodon.example",
+            "http://192.168.1.10:3000",
+            "http://evillocalhost",
+            "javascript://alert(1)",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "ftp://mastodon.example",
+            "ws://localhost:3000",
+            "wss://mastodon.example",
+            "https://",
+            "",
+        ] {
+            assert!(
+                Instance::parse(bad).is_err(),
+                "expected Instance::parse({bad:?}) to fail"
+            );
+        }
     }
 }

@@ -19,7 +19,7 @@ impl<T: Transport> SettingsActions for RestInstance<T> {
     }
 
     async fn dismiss_announcement(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/announcements/{id}/dismiss"))?;
+        let url = self.url_segments(&["api", "v1", "announcements", id, "dismiss"])?;
         // Dismissing answers 200 with an empty body; decoding it as an object would
         // make a successful dismissal look like a failure.
         self.send_empty(self.post(url)).await

@@ -19,38 +19,41 @@ impl<T: Transport> AdminActions for RestInstance<T> {
     type Error = Error;
 
     async fn reports(&self, state: ReportState, limit: u16) -> Result<Vec<Report>> {
-        let url = self.url(&format!(
-            "/api/v1/admin/reports?state={}&limit={limit}",
-            state.as_str()
-        ))?;
+        let mut url = self.url("/api/v1/admin/reports")?;
+        url.query_pairs_mut()
+            .append_pair("state", state.as_str())
+            .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }
 
     async fn resolve_report(&self, id: &str) -> Result<Report> {
-        let url = self.url(&format!("/api/v1/admin/reports/{id}/resolve"))?;
+        let url = self.url_segments(&["api", "v1", "admin", "reports", id, "resolve"])?;
         self.fetch(self.post(url)).await
     }
 
     async fn reopen_report(&self, id: &str) -> Result<Report> {
-        let url = self.url(&format!("/api/v1/admin/reports/{id}/reopen"))?;
+        let url = self.url_segments(&["api", "v1", "admin", "reports", id, "reopen"])?;
         self.fetch(self.post(url)).await
     }
 
     async fn admin_accounts(&self, local: bool, limit: u16) -> Result<Vec<AdminAccount>> {
-        let url = self.url(&format!(
-            "/api/v1/admin/accounts?local={local}&limit={limit}"
-        ))?;
+        let mut url = self.url("/api/v1/admin/accounts")?;
+        url.query_pairs_mut()
+            .append_pair("local", if local { "true" } else { "false" })
+            .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }
 
     async fn moderate_account(&self, id: &str, action: ModerationAction) -> Result<AdminAccount> {
-        let url = self.url(&format!("/api/v1/admin/accounts/{id}/action"))?;
+        let url = self.url_segments(&["api", "v1", "admin", "accounts", id, "action"])?;
         let form = vec![("type", action.as_str().to_owned())];
         self.fetch(self.post_form(url, &form)).await
     }
 
     async fn domain_blocks(&self, limit: u16) -> Result<Vec<DomainBlock>> {
-        let url = self.url(&format!("/api/v1/admin/domain_blocks?limit={limit}"))?;
+        let mut url = self.url("/api/v1/admin/domain_blocks")?;
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }
 
@@ -68,7 +71,7 @@ impl<T: Transport> AdminActions for RestInstance<T> {
     }
 
     async fn delete_domain_block(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/admin/domain_blocks/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "admin", "domain_blocks", id])?;
         // The body of a delete is empty, so it cannot be decoded as the removed block.
         self.send_empty(self.delete(url)).await
     }
@@ -117,7 +120,9 @@ impl<T: Transport> AdminActions for RestInstance<T> {
     }
 
     async fn domain_allows(&self, limit: u16) -> Result<Vec<DomainAllow>> {
-        let url = self.url(&format!("/api/v1/admin/domain_allows?limit={limit}"))?;
+        let mut url = self.url("/api/v1/admin/domain_allows")?;
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }
 
@@ -128,7 +133,7 @@ impl<T: Transport> AdminActions for RestInstance<T> {
     }
 
     async fn delete_domain_allow(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/admin/domain_allows/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "admin", "domain_allows", id])?;
         self.send_empty(self.delete(url)).await
     }
 }

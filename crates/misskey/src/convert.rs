@@ -180,8 +180,9 @@ fn text_html(text: &str, emojis: &[CustomEmoji]) -> String {
         let shortcode = token.trim_matches(':');
         if token.starts_with(':') && token.ends_with(':') {
             if let Some(emoji) = emojis.iter().find(|emoji| emoji.shortcode == shortcode) {
+                let escaped_shortcode = escape(shortcode);
                 html.push_str(&format!(
-                    "<img class=\"emoji\" alt=\":{shortcode}:\" title=\":{shortcode}:\" src=\"{}\">",
+                    "<img class=\"emoji\" alt=\":{escaped_shortcode}:\" title=\":{escaped_shortcode}:\" src=\"{}\">",
                     escape(&emoji.url)
                 ));
                 continue;
@@ -400,5 +401,42 @@ mod tests {
         assert_eq!(visibility_out(Visibility::Unlisted), "home");
         assert_eq!(visibility_out(Visibility::Private), "followers");
         assert_eq!(visibility_out(Visibility::Direct), "specified");
+    }
+
+    #[test]
+    fn emoji_shortcode_is_html_escaped() {
+        let emojis = vec![
+            CustomEmoji {
+                shortcode: r#"blob"onload="alert(1)"#.to_owned(),
+                url: "https://misskey.example/blob.png".to_owned(),
+                static_url: None,
+            },
+            CustomEmoji {
+                shortcode: "<script>".to_owned(),
+                url: "https://misskey.example/s.png".to_owned(),
+                static_url: None,
+            },
+        ];
+        let html = note_html(r#":blob"onload="alert(1): :<script>:"#, &emojis);
+        assert!(
+            !html.contains(r#"onload="alert(1)""#),
+            "attribute breakout must be escaped, got: {html}"
+        );
+        assert!(
+            html.contains(r#"alt=":blob&quot;onload=&quot;alert(1):""#),
+            "alt must escape quotes, got: {html}"
+        );
+        assert!(
+            html.contains(r#"title=":blob&quot;onload=&quot;alert(1):""#),
+            "title must escape quotes, got: {html}"
+        );
+        assert!(
+            !html.contains("<script>"),
+            "angle brackets in shortcode must be escaped, got: {html}"
+        );
+        assert!(
+            html.contains(r#"alt=":&lt;script&gt;:""#),
+            "alt must escape angle brackets, got: {html}"
+        );
     }
 }

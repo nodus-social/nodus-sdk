@@ -18,9 +18,11 @@ impl<T: Transport> RegistrationActions for RestInstance<T> {
         //
         // `status=pending` is only meaningful on a server that requires approval; one that
         // does not answers with an empty list, which is the correct answer here.
-        let url = self.url(&format!(
-            "/api/v2/admin/accounts?origin=local&status=pending&limit={limit}"
-        ))?;
+        let mut url = self.url("/api/v2/admin/accounts")?;
+        url.query_pairs_mut()
+            .append_pair("origin", "local")
+            .append_pair("status", "pending")
+            .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }
 
@@ -36,7 +38,7 @@ impl<T: Transport> RegistrationActions for RestInstance<T> {
 impl<T: Transport> RestInstance<T> {
     /// Approve and reject differ only in the last path segment.
     async fn decide(&self, id: &str, decision: &str) -> Result<AdminAccount> {
-        let url = self.url(&format!("/api/v1/admin/accounts/{id}/{decision}"))?;
+        let url = self.url_segments(&["api", "v1", "admin", "accounts", id, decision])?;
         self.fetch(self.post(url)).await
     }
 }

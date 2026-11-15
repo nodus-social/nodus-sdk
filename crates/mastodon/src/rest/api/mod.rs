@@ -46,17 +46,17 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
     }
 
     async fn tag_timeline(&self, tag: &str, params: PageParams) -> Result<Page<Status>> {
-        let url = self.page_url(&format!("/api/v1/timelines/tag/{tag}"), &params)?;
+        let url = self.page_url_segments(&["api", "v1", "timelines", "tag", tag], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 
     async fn status(&self, id: &str) -> Result<Status> {
-        let url = self.url(&format!("/api/v1/statuses/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "statuses", id])?;
         self.fetch(self.get(url)).await
     }
 
     async fn status_context(&self, id: &str) -> Result<Context> {
-        let url = self.url(&format!("/api/v1/statuses/{id}/context"))?;
+        let url = self.url_segments(&["api", "v1", "statuses", id, "context"])?;
         self.fetch(self.get(url)).await
     }
 
@@ -66,7 +66,7 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
     }
 
     async fn account(&self, id: &LocalId) -> Result<Account> {
-        let url = self.url(&format!("/api/v1/accounts/{}", id.0))?;
+        let url = self.url_segments(&["api", "v1", "accounts", &id.0])?;
         self.fetch(self.get(url)).await
     }
 
@@ -77,17 +77,19 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
     }
 
     async fn account_followers(&self, id: &LocalId, params: PageParams) -> Result<Page<Account>> {
-        let url = self.page_url(&format!("/api/v1/accounts/{}/followers", id.0), &params)?;
+        let url =
+            self.page_url_segments(&["api", "v1", "accounts", &id.0, "followers"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 
     async fn account_following(&self, id: &LocalId, params: PageParams) -> Result<Page<Account>> {
-        let url = self.page_url(&format!("/api/v1/accounts/{}/following", id.0), &params)?;
+        let url =
+            self.page_url_segments(&["api", "v1", "accounts", &id.0, "following"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 
     async fn account_statuses(&self, id: &LocalId, params: PageParams) -> Result<Page<Status>> {
-        let url = self.page_url(&format!("/api/v1/accounts/{}/statuses", id.0), &params)?;
+        let url = self.page_url_segments(&["api", "v1", "accounts", &id.0, "statuses"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 
@@ -101,12 +103,12 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
     }
 
     async fn follow(&self, id: &LocalId) -> Result<Relationship> {
-        let url = self.url(&format!("/api/v1/accounts/{}/follow", id.0))?;
+        let url = self.url_segments(&["api", "v1", "accounts", &id.0, "follow"])?;
         self.fetch(self.post(url)).await
     }
 
     async fn unfollow(&self, id: &LocalId) -> Result<Relationship> {
-        let url = self.url(&format!("/api/v1/accounts/{}/unfollow", id.0))?;
+        let url = self.url_segments(&["api", "v1", "accounts", &id.0, "unfollow"])?;
         self.fetch(self.post(url)).await
     }
 
@@ -118,7 +120,7 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
     }
 
     async fn delete_status(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/statuses/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "statuses", id])?;
         self.send_empty(self.delete(url)).await
     }
 }
@@ -199,7 +201,8 @@ mod sync_impl {
         type Error = crate::Error;
 
         async fn following(&self, id: &LocalId, params: PageParams) -> Result<Page<Account>> {
-            let url = self.page_url(&format!("/api/v1/accounts/{}/following", id.0), &params)?;
+            let url =
+                self.page_url_segments(&["api", "v1", "accounts", &id.0, "following"], &params)?;
             self.fetch_page(self.get(url), &params).await
         }
 
@@ -211,6 +214,96 @@ mod sync_impl {
         async fn bookmarks(&self, params: PageParams) -> Result<Page<Status>> {
             let url = self.page_url("/api/v1/bookmarks", &params)?;
             self.fetch_page(self.get(url), &params).await
+        }
+    }
+}
+
+#[cfg(test)]
+mod url_tests {
+    use core::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::rest::{HttpRequest, HttpResponse};
+
+    #[derive(Clone, Default)]
+    struct Recording(Rc<RefCell<Vec<url::Url>>>);
+
+    impl Transport for Recording {
+        fn send(
+            &self,
+            request: HttpRequest,
+        ) -> impl core::future::Future<Output = Result<HttpResponse>> {
+            self.0.borrow_mut().push(request.url);
+            core::future::ready(Ok(HttpResponse {
+                status: 200,
+                retry_after_s: None,
+                body: b"[]".to_vec(),
+            }))
+        }
+    }
+
+    fn instance_at(base: &str) -> (RestInstance<Recording>, Rc<RefCell<Vec<url::Url>>>) {
+        let recording = Recording::default();
+        let seen = Rc::clone(&recording.0);
+        let instance = crate::Instance::parse(base).expect("valid host");
+        (
+            RestInstance::with_transport(&instance, "token", recording),
+            seen,
+        )
+    }
+
+    fn block_on<F: core::future::Future>(future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            core::task::Poll::Ready(output) => output,
+            core::task::Poll::Pending => panic!("recording transport never pends"),
+        }
+    }
+
+    #[test]
+    fn tag_timeline_encodes_hash_instead_of_treating_it_as_fragment() {
+        let (client, seen) = instance_at("https://mastodon.example/prefix");
+        let _ = block_on(client.tag_timeline("#rust", PageParams::default()));
+        let url = &seen.borrow()[0];
+        assert_eq!(url.fragment(), None);
+        assert_eq!(url.path(), "/prefix/api/v1/timelines/tag/%23rust");
+    }
+
+    #[test]
+    fn status_and_account_ids_cannot_traverse_or_inject_query_or_fragment() {
+        let (client, seen) = instance_at("https://mastodon.example");
+        let _ = block_on(client.status("../admin?foo=bar#frag"));
+        let _ = block_on(client.status_context("../admin?foo=bar#frag"));
+        let _ = block_on(
+            client.account_followers(&LocalId("../x#y".to_owned()), PageParams::default()),
+        );
+        let _ = block_on(client.delete_status("123?admin=1#x"));
+
+        let urls = seen.borrow();
+        assert_eq!(
+            urls[0].path(),
+            "/api/v1/statuses/..%2Fadmin%3Ffoo=bar%23frag"
+        );
+        assert_eq!(urls[0].query(), None);
+        assert_eq!(urls[0].fragment(), None);
+
+        assert_eq!(
+            urls[1].path(),
+            "/api/v1/statuses/..%2Fadmin%3Ffoo=bar%23frag/context"
+        );
+        assert_eq!(urls[2].path(), "/api/v1/accounts/..%2Fx%23y/followers");
+        assert_eq!(urls[3].path(), "/api/v1/statuses/123%3Fadmin=1%23x");
+    }
+
+    #[test]
+    fn dot_and_empty_segments_are_rejected() {
+        let (client, _) = instance_at("https://mastodon.example");
+        for bad in ["", ".", ".."] {
+            assert!(block_on(client.status(bad)).is_err());
+            assert!(block_on(client.tag_timeline(bad, PageParams::default())).is_err());
+            assert!(block_on(client.account(&LocalId(bad.to_owned()))).is_err());
         }
     }
 }

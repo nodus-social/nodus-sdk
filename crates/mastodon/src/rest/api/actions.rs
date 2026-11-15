@@ -4,6 +4,8 @@
 //! describes what the SDK *reads*, this one what a user *does*. Both are implemented
 //! for the same `RestInstance<T>`, so a transport still has to write nothing.
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use crate::actions::{AccountActions, Browse, MediaActions, Search, StatusActions};
 use crate::model::{
     Account, Conversation, Draft, HistoryEntry, List, LocalId, MediaAttachment, Page, PageParams,
@@ -13,8 +15,12 @@ use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
 
 /// Runs a status verb that answers with the status itself.
-async fn status_verb<T: Transport>(client: &RestInstance<T>, path: &str) -> Result<Status> {
-    let url = client.url(path)?;
+async fn status_verb<T: Transport>(
+    client: &RestInstance<T>,
+    id: &str,
+    verb: &str,
+) -> Result<Status> {
+    let url = client.url_segments(&["api", "v1", "statuses", id, verb])?;
     client.fetch(client.post(url)).await
 }
 
@@ -22,45 +28,45 @@ impl<T: Transport> StatusActions for RestInstance<T> {
     type Error = Error;
 
     async fn favourite(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/favourite")).await
+        status_verb(self, id, "favourite").await
     }
 
     async fn unfavourite(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/unfavourite")).await
+        status_verb(self, id, "unfavourite").await
     }
 
     async fn reblog(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/reblog")).await
+        status_verb(self, id, "reblog").await
     }
 
     async fn unreblog(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/unreblog")).await
+        status_verb(self, id, "unreblog").await
     }
 
     async fn bookmark(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/bookmark")).await
+        status_verb(self, id, "bookmark").await
     }
 
     async fn unbookmark(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/unbookmark")).await
+        status_verb(self, id, "unbookmark").await
     }
 
     async fn pin(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/pin")).await
+        status_verb(self, id, "pin").await
     }
 
     async fn unpin(&self, id: &str) -> Result<Status> {
-        status_verb(self, &format!("/api/v1/statuses/{id}/unpin")).await
+        status_verb(self, id, "unpin").await
     }
 
     async fn edit_status(&self, id: &str, draft: &Draft) -> Result<Status> {
-        let url = self.url(&format!("/api/v1/statuses/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "statuses", id])?;
         let form = super::status_form(draft, true);
         self.fetch(self.put_form(url, &form)).await
     }
 
     async fn vote(&self, poll_id: &str, choices: &[usize]) -> Result<Poll> {
-        let url = self.url(&format!("/api/v1/polls/{poll_id}/votes"))?;
+        let url = self.url_segments(&["api", "v1", "polls", poll_id, "votes"])?;
         let form: Vec<(&str, String)> = choices
             .iter()
             .map(|choice| ("choices[]", choice.to_string()))
@@ -69,7 +75,7 @@ impl<T: Transport> StatusActions for RestInstance<T> {
     }
 
     async fn history(&self, id: &str) -> Result<Vec<HistoryEntry>> {
-        let url = self.url(&format!("/api/v1/statuses/{id}/history"))?;
+        let url = self.url_segments(&["api", "v1", "statuses", id, "history"])?;
         self.fetch(self.get(url)).await
     }
 
@@ -78,7 +84,8 @@ impl<T: Transport> StatusActions for RestInstance<T> {
         id: &str,
         params: PageParams,
     ) -> Result<Page<crate::model::Account>> {
-        let url = self.page_url(&format!("/api/v1/statuses/{id}/reblogged_by"), &params)?;
+        let url =
+            self.page_url_segments(&["api", "v1", "statuses", id, "reblogged_by"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 
@@ -87,7 +94,8 @@ impl<T: Transport> StatusActions for RestInstance<T> {
         id: &str,
         params: PageParams,
     ) -> Result<Page<crate::model::Account>> {
-        let url = self.page_url(&format!("/api/v1/statuses/{id}/favourited_by"), &params)?;
+        let url =
+            self.page_url_segments(&["api", "v1", "statuses", id, "favourited_by"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 }
@@ -128,12 +136,12 @@ impl<T: Transport> AccountActions for RestInstance<T> {
     }
 
     async fn authorize_follow_request(&self, id: &LocalId) -> Result<Relationship> {
-        let url = self.url(&format!("/api/v1/follow_requests/{}/authorize", id.0))?;
+        let url = self.url_segments(&["api", "v1", "follow_requests", &id.0, "authorize"])?;
         self.fetch(self.post(url)).await
     }
 
     async fn reject_follow_request(&self, id: &LocalId) -> Result<()> {
-        let url = self.url(&format!("/api/v1/follow_requests/{}/reject", id.0))?;
+        let url = self.url_segments(&["api", "v1", "follow_requests", &id.0, "reject"])?;
         self.send_empty(self.post(url)).await
     }
 
@@ -173,7 +181,8 @@ impl<T: Transport> AccountActions for RestInstance<T> {
         id: &LocalId,
         params: PageParams,
     ) -> Result<Page<crate::model::Account>> {
-        let url = self.page_url(&format!("/api/v1/accounts/{}/followers", id.0), &params)?;
+        let url =
+            self.page_url_segments(&["api", "v1", "accounts", &id.0, "followers"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 
@@ -182,14 +191,16 @@ impl<T: Transport> AccountActions for RestInstance<T> {
         id: &LocalId,
         params: PageParams,
     ) -> Result<Page<crate::model::Account>> {
-        let url = self.page_url(&format!("/api/v1/accounts/{}/following", id.0), &params)?;
+        let url =
+            self.page_url_segments(&["api", "v1", "accounts", &id.0, "following"], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 }
 
-/// The boundary of every upload. It must not appear in the file's bytes; the
-/// payload is checked against it in `multipart_body`.
-const UPLOAD_BOUNDARY: &str = "nodus-upload-boundary";
+/// Prefix for generated multipart boundaries; a unique suffix is appended and
+/// checked against the payload and description in `multipart_body`.
+const UPLOAD_BOUNDARY_PREFIX: &str = "nodus-upload-boundary";
+static UPLOAD_BOUNDARY_SEQ: AtomicU64 = AtomicU64::new(1);
 
 impl<T: Transport> RestInstance<T> {
     /// The exact request `upload_media` would send.
@@ -204,10 +215,10 @@ impl<T: Transport> RestInstance<T> {
         description: Option<&str>,
     ) -> Result<crate::rest::HttpRequest> {
         let url = self.url("/api/v2/media")?;
-        let body = multipart_body(UPLOAD_BOUNDARY, bytes, mime, description);
+        let (boundary, body) = multipart_body(bytes, mime, description)?;
         Ok(self.post_body(
             url,
-            &format!("multipart/form-data; boundary={UPLOAD_BOUNDARY}"),
+            &format!("multipart/form-data; boundary={boundary}"),
             body,
         ))
     }
@@ -216,13 +227,43 @@ impl<T: Transport> RestInstance<T> {
 impl<T: Transport> RestInstance<T> {
     /// The six account verbs that all answer with a relationship.
     async fn account_verb(&self, id: &str, verb: &str) -> Result<Relationship> {
-        let url = self.url(&format!("/api/v1/accounts/{id}/{verb}"))?;
+        let url = self.url_segments(&["api", "v1", "accounts", id, verb])?;
         self.fetch(self.post(url)).await
     }
 }
 
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
+fn choose_boundary(bytes: &[u8], mime: &str, description: Option<&str>) -> String {
+    let desc_bytes = description.unwrap_or_default().as_bytes();
+    loop {
+        let seq = UPLOAD_BOUNDARY_SEQ.fetch_add(1, Ordering::Relaxed);
+        let candidate = format!("{UPLOAD_BOUNDARY_PREFIX}-{seq}");
+        let needle = candidate.as_bytes();
+        if !contains_subslice(bytes, needle)
+            && !contains_subslice(mime.as_bytes(), needle)
+            && !contains_subslice(desc_bytes, needle)
+        {
+            return candidate;
+        }
+    }
+}
+
 /// One multipart part: the file, plus an optional description Mastodon stores for alt text.
-fn multipart_body(boundary: &str, bytes: &[u8], mime: &str, description: Option<&str>) -> Vec<u8> {
+fn multipart_body(
+    bytes: &[u8],
+    mime: &str,
+    description: Option<&str>,
+) -> Result<(String, Vec<u8>)> {
+    if mime.trim().is_empty() || mime.bytes().any(|b| b.is_ascii_control()) {
+        return Err(Error::Transport("invalid media MIME type".to_owned()));
+    }
+    let boundary = choose_boundary(bytes, mime, description);
     let mut body = Vec::with_capacity(bytes.len() + 512);
     body.extend_from_slice(
         format!(
@@ -241,7 +282,7 @@ fn multipart_body(boundary: &str, bytes: &[u8], mime: &str, description: Option<
         );
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
-    body
+    Ok((boundary, body))
 }
 
 impl<T: Transport> MediaActions for RestInstance<T> {
@@ -253,32 +294,26 @@ impl<T: Transport> MediaActions for RestInstance<T> {
         mime: &str,
         description: Option<&str>,
     ) -> Result<MediaAttachment> {
-        let url = self.url("/api/v2/media")?;
-        let body = multipart_body(UPLOAD_BOUNDARY, bytes, mime, description);
-        let request = self.post_body(
-            url,
-            &format!("multipart/form-data; boundary={UPLOAD_BOUNDARY}"),
-            body,
-        );
+        let request = self.media_upload_request(bytes, mime, description)?;
         self.fetch(request).await
     }
 
     async fn update_media(&self, id: &str, description: &str) -> Result<MediaAttachment> {
-        let url = self.url(&format!("/api/v1/media/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "media", id])?;
         let form = [("description", description.to_owned())];
         let request = self.put_form(url, &form);
         self.fetch(request).await
     }
 
     async fn set_media_sensitive(&self, id: &str, sensitive: bool) -> Result<MediaAttachment> {
-        let url = self.url(&format!("/api/v1/media/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "media", id])?;
         let form = [("sensitive", sensitive.to_string())];
         let request = self.put_form(url, &form);
         self.fetch(request).await
     }
 
     async fn media_status(&self, id: &str) -> Result<MediaAttachment> {
-        let url = self.url(&format!("/api/v1/media/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "media", id])?;
         self.fetch(self.get(url)).await
     }
 }
@@ -302,7 +337,7 @@ impl<T: Transport> Browse for RestInstance<T> {
     }
 
     async fn mark_conversation_read(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/conversations/{id}/read"))?;
+        let url = self.url_segments(&["api", "v1", "conversations", id, "read"])?;
         self.send_empty(self.post(url)).await
     }
 
@@ -310,14 +345,17 @@ impl<T: Transport> Browse for RestInstance<T> {
         // `order=active` asks for accounts that actually post; the default ordering is
         // by sign-up date, which surfaces empty profiles.
         let limit = <Self as Browse>::DIRECTORY_PAGE;
-        let url = self.url(&format!(
-            "/api/v1/directory?local={local_only}&order=active&offset={offset}&limit={limit}"
-        ))?;
+        let mut url = self.url("/api/v1/directory")?;
+        url.query_pairs_mut()
+            .append_pair("local", if local_only { "true" } else { "false" })
+            .append_pair("order", "active")
+            .append_pair("offset", &offset.to_string())
+            .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }
 
     async fn mute_conversation(&self, id: &str, muted: bool) -> Result<Conversation> {
-        let url = self.url(&format!("/api/v1/conversations/{id}/mute"))?;
+        let url = self.url_segments(&["api", "v1", "conversations", id, "mute"])?;
         let request = if muted {
             self.post(url)
         } else {
@@ -338,13 +376,13 @@ impl<T: Transport> Browse for RestInstance<T> {
     }
 
     async fn rename_list(&self, id: &str, title: &str) -> Result<List> {
-        let url = self.url(&format!("/api/v1/lists/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "lists", id])?;
         self.fetch(self.put_form(url, &[("title", title.to_owned())]))
             .await
     }
 
     async fn delete_list(&self, id: &str) -> Result<()> {
-        let url = self.url(&format!("/api/v1/lists/{id}"))?;
+        let url = self.url_segments(&["api", "v1", "lists", id])?;
         self.send_empty(self.delete(url)).await
     }
 
@@ -357,12 +395,12 @@ impl<T: Transport> Browse for RestInstance<T> {
     }
 
     async fn list_accounts(&self, list_id: &str) -> Result<Vec<Account>> {
-        let url = self.url(&format!("/api/v1/lists/{list_id}/accounts"))?;
+        let url = self.url_segments(&["api", "v1", "lists", list_id, "accounts"])?;
         self.fetch(self.get(url)).await
     }
 
     async fn list_timeline(&self, list_id: &str, params: PageParams) -> Result<Page<Status>> {
-        let url = self.page_url(&format!("/api/v1/timelines/list/{list_id}"), &params)?;
+        let url = self.page_url_segments(&["api", "v1", "timelines", "list", list_id], &params)?;
         self.fetch_page(self.get(url), &params).await
     }
 }
@@ -370,7 +408,7 @@ impl<T: Transport> Browse for RestInstance<T> {
 impl<T: Transport> RestInstance<T> {
     /// Adds or removes accounts, which differ only in the verb.
     async fn list_members(&self, list_id: &str, accounts: &[LocalId], add: bool) -> Result<()> {
-        let url = self.url(&format!("/api/v1/lists/{list_id}/accounts"))?;
+        let url = self.url_segments(&["api", "v1", "lists", list_id, "accounts"])?;
         let form: Vec<(&str, String)> = accounts
             .iter()
             .map(|account| ("account_ids[]", account.0.clone()))
@@ -395,5 +433,136 @@ impl<T: Transport> Search for RestInstance<T> {
             pairs.append_pair("resolve", if resolve { "true" } else { "false" });
         }
         self.fetch(self.get(url)).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use core::cell::RefCell;
+    use std::rc::Rc;
+
+    use super::*;
+    use crate::rest::{HttpRequest, HttpResponse};
+
+    #[derive(Clone, Default)]
+    struct Recording(Rc<RefCell<Vec<HttpRequest>>>);
+
+    impl Transport for Recording {
+        fn send(
+            &self,
+            request: HttpRequest,
+        ) -> impl core::future::Future<Output = Result<HttpResponse>> {
+            self.0.borrow_mut().push(request);
+            core::future::ready(Ok(HttpResponse {
+                status: 200,
+                retry_after_s: None,
+                body: b"[]".to_vec(),
+            }))
+        }
+    }
+
+    fn instance() -> (RestInstance<Recording>, Rc<RefCell<Vec<HttpRequest>>>) {
+        let recording = Recording::default();
+        let seen = Rc::clone(&recording.0);
+        let instance = crate::Instance::parse("https://mastodon.example").expect("valid host");
+        (
+            RestInstance::with_transport(&instance, "token", recording),
+            seen,
+        )
+    }
+
+    fn block_on<F: core::future::Future>(future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            core::task::Poll::Ready(output) => output,
+            core::task::Poll::Pending => panic!("recording transport never pends"),
+        }
+    }
+
+    #[test]
+    fn multipart_rejects_crlf_and_empty_mime() {
+        let (client, _) = instance();
+        for bad_mime in [
+            "",
+            "   ",
+            "image/png\r\nX-Injected: yes",
+            "image/png\nX-Injected: yes",
+            "image/png\r",
+            "image/png\0",
+        ] {
+            assert!(
+                client
+                    .media_upload_request(b"pngbytes", bad_mime, None)
+                    .is_err(),
+                "expected bad mime {bad_mime:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn multipart_boundary_never_collides_with_payload_or_description() {
+        let (client, _) = instance();
+        let payload = b"--nodus-upload-boundary\r\nContent-Disposition: form-data; name=\"evil\"\r\n\r\npwned";
+        let desc = "--nodus-upload-boundary\r\n--nodus-upload-boundary--";
+        let req = client
+            .media_upload_request(payload, "image/png", Some(desc))
+            .expect("upload request should choose a collision-free boundary");
+
+        let content_type = req
+            .headers
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("Content-Type"))
+            .map(|(_, value)| value.as_str())
+            .expect("Content-Type header");
+        let boundary = content_type
+            .strip_prefix("multipart/form-data; boundary=")
+            .expect("multipart boundary parameter");
+        let body = req.body.expect("request body");
+
+        assert!(
+            !payload
+                .windows(boundary.len())
+                .any(|w| w == boundary.as_bytes()),
+            "chosen boundary {boundary:?} must not appear in file payload"
+        );
+        assert!(
+            !desc
+                .as_bytes()
+                .windows(boundary.len())
+                .any(|w| w == boundary.as_bytes()),
+            "chosen boundary {boundary:?} must not appear in description"
+        );
+        let delimiter = format!("--{boundary}");
+        let delimiter_count = body
+            .windows(delimiter.len())
+            .filter(|w| *w == delimiter.as_bytes())
+            .count();
+        assert_eq!(
+            delimiter_count, 3,
+            "expected exactly 3 boundary markers (file, description, closing), got {delimiter_count}"
+        );
+    }
+
+    #[test]
+    fn action_urls_escape_ids_and_build_directory_query_safely() {
+        let (client, seen) = instance();
+        let _ = block_on(client.favourite("../admin?x=1#y"));
+        let _ = block_on(client.list_timeline("../x#y", PageParams::default()));
+        let _ = block_on(client.directory(true, 40));
+
+        let reqs = seen.borrow();
+        assert_eq!(
+            reqs[0].url.path(),
+            "/api/v1/statuses/..%2Fadmin%3Fx=1%23y/favourite"
+        );
+        assert_eq!(reqs[0].url.query(), None);
+        assert_eq!(reqs[0].url.fragment(), None);
+        assert_eq!(reqs[1].url.path(), "/api/v1/timelines/list/..%2Fx%23y");
+        assert_eq!(reqs[2].url.path(), "/api/v1/directory");
+        assert_eq!(
+            reqs[2].url.query(),
+            Some("local=true&order=active&offset=40&limit=40")
+        );
     }
 }
