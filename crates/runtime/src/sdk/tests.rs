@@ -555,3 +555,300 @@ fn signing_out_clears_all_private_state() {
     assert!(sdk.read_account("acct-dm").is_none());
     assert!(state.accounts.with(std::collections::HashMap::is_empty));
 }
+
+struct FeedProbe {
+    calls: core::cell::Cell<usize>,
+    fail: core::cell::Cell<bool>,
+}
+
+impl FeedProbe {
+    fn new(fail: bool) -> Self {
+        Self {
+            calls: core::cell::Cell::new(0),
+            fail: core::cell::Cell::new(fail),
+        }
+    }
+}
+
+impl Discovery for FeedProbe {
+    type Error = Unavailable;
+
+    fn meta(&self) -> impl core::future::Future<Output = Result<Meta, Self::Error>> {
+        fail::<Meta>()
+    }
+
+    fn me(&self) -> impl core::future::Future<Output = Result<MeResponse, Self::Error>> {
+        fail::<MeResponse>()
+    }
+
+    fn feed(
+        &self,
+        _cursor: Option<&str>,
+    ) -> impl core::future::Future<Output = Result<AccountFeed, Self::Error>> {
+        self.calls.set(self.calls.get() + 1);
+        if self.fail.get() {
+            core::future::ready(Err(Unavailable))
+        } else {
+            let (account_feed, _) = sample_feeds();
+            core::future::ready(Ok(account_feed))
+        }
+    }
+
+    fn posts(
+        &self,
+        _cursor: Option<&str>,
+    ) -> impl core::future::Future<Output = Result<PostFeed, Self::Error>> {
+        fail::<PostFeed>()
+    }
+
+    fn refresh(
+        &self,
+        _feed_id: &str,
+    ) -> impl core::future::Future<Output = Result<AccountFeed, Self::Error>> {
+        fail::<AccountFeed>()
+    }
+
+    fn send_events(
+        &self,
+        _batch: &EventBatch,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+
+    fn set_sync(
+        &self,
+        _enable: bool,
+        _telemetry_opt_in: bool,
+    ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
+        fail::<()>()
+    }
+}
+
+fn signed_in_session() -> nodus_state::Session {
+    nodus_state::Session {
+        host: "remote.test".to_owned(),
+        account_id: "self-1".to_owned(),
+        acct: "someone@remote.test".to_owned(),
+        scopes: vec!["read".to_owned()],
+    }
+}
+
+#[derive(Clone)]
+struct SharedCache(std::rc::Rc<MemoryPersistence>);
+
+impl nodus_persist::Persistence for SharedCache {
+    fn load(
+        &self,
+        key: &nodus_persist::CacheKey,
+    ) -> impl core::future::Future<Output = Result<Option<Vec<u8>>, nodus_persist::PersistenceError>>
+    {
+        self.0.load(key)
+    }
+
+    fn store(
+        &self,
+        key: &nodus_persist::CacheKey,
+        value: Vec<u8>,
+    ) -> impl core::future::Future<Output = Result<(), nodus_persist::PersistenceError>> {
+        self.0.store(key, value)
+    }
+
+    fn remove(
+        &self,
+        key: &nodus_persist::CacheKey,
+    ) -> impl core::future::Future<Output = Result<(), nodus_persist::PersistenceError>> {
+        self.0.remove(key)
+    }
+
+    fn clear(
+        &self,
+    ) -> impl core::future::Future<Output = Result<(), nodus_persist::PersistenceError>> {
+        self.0.clear()
+    }
+}
+
+#[test]
+fn restore_home_timeline_restores_statuses_so_reload_within_ttl_is_not_blank() {
+    let cache = SharedCache(std::rc::Rc::new(MemoryPersistence::new()));
+
+    // First session loads Home and caches it.
+    let first_sdk = Sdk::new(
+        Pages::of(vec![vec!["1", "2"]]),
+        Consented(SyncConsent::default()),
+        cache.clone(),
+        FixedClock::at(1_000),
+    );
+    block_on(first_sdk.load_timeline(TimelineRequest::Home, None, 20)).expect("initial load");
+    block_on(first_sdk.cache_home_timeline("remote.test")).expect("cache home timeline");
+
+    // Second session (reload within TTL) restores from persistence and runs ensure_timeline.
+    let second_instance = Pages::of(vec![vec!["9"]]);
+    let second_sdk = Sdk::new(
+        second_instance,
+        Consented(SyncConsent::default()),
+        cache,
+        FixedClock::at(5_000),
+    );
+    block_on(second_sdk.restore_home_timeline("remote.test"));
+
+    let (restored, _) = second_sdk.read_timeline(&TimelineRequest::Home);
+    assert_eq!(
+        restored
+            .iter()
+            .map(|status| status.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["1", "2"],
+        "warm-started home timeline must render cached statuses instead of a blank list",
+    );
+
+    let ensured = block_on(second_sdk.ensure_timeline(TimelineRequest::Home, None, 20, 60_000))
+        .expect("ensure succeeds");
+    assert!(
+        ensured.is_none(),
+        "restored timeline with statuses within TTL should not refetch",
+    );
+}
+
+#[test]
+fn ensure_timeline_refetches_when_page_is_fresh_but_statuses_are_missing() {
+    use nodus_persist::{CacheKey, Persistence};
+    use nodus_state::{Timeline, TimelinePage};
+
+    let cache = MemoryPersistence::new();
+    let stale_only_ids = TimelinePage {
+        status_ids: vec!["1".to_owned(), "2".to_owned()],
+        max_id: Some("2".to_owned()),
+        fetched_at: Some(1_000),
+    };
+    block_on(cache.store(
+        &CacheKey::Timeline {
+            host: "remote.test".to_owned(),
+            which: Timeline::Home,
+            tag: None,
+        },
+        serde_json::to_vec(&stale_only_ids).expect("serialize page"),
+    ))
+    .expect("store timeline page");
+
+    let sdk = Sdk::new(
+        Pages::of(vec![vec!["1", "2"]]),
+        Consented(SyncConsent::default()),
+        cache,
+        FixedClock::at(5_000),
+    );
+    block_on(sdk.restore_home_timeline("remote.test"));
+
+    let ensured = block_on(sdk.ensure_timeline(TimelineRequest::Home, None, 20, 60_000))
+        .expect("ensure refetches when entity store lacks statuses");
+    assert!(
+        ensured.is_some(),
+        "must fetch from network when timeline ids are missing from statuses store",
+    );
+    assert_eq!(sdk.read_timeline(&TimelineRequest::Home).0.len(), 2);
+}
+
+#[test]
+fn drive_does_not_refresh_feed_when_signed_out() {
+    let sdk = Sdk::new(
+        Pages::of(vec![vec!["1"]]),
+        FeedProbe::new(false),
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+    let mut driver = crate::driver::Driver::new();
+    let now = web_time::Instant::now();
+
+    let report = block_on(sdk.drive(&mut driver, now));
+
+    assert_eq!(report, crate::sdk::Drive::default());
+    assert!(driver.budget().last_attempt.is_none());
+}
+
+#[test]
+fn drive_refreshes_feed_at_ten_minutes_despite_five_minute_timeline_refreshes() {
+    use crate::scheduler::{FEED_STALE, TIMELINE_STALE};
+    use std::time::Duration;
+
+    let sdk = Sdk::new(
+        Pages::of(vec![vec!["1"], vec!["2"], vec!["3"]]),
+        FeedProbe::new(false),
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+    sdk.adopt_session(signed_in_session());
+    let mut driver = crate::driver::Driver::new();
+    let t0 = web_time::Instant::now();
+
+    // Boot: both timeline and feed load.
+    let first = block_on(sdk.drive(&mut driver, t0));
+    assert!(first.timeline);
+    assert!(first.feed);
+
+    // At +5m: timeline refreshes, feed is still fresh.
+    let t5 = t0 + TIMELINE_STALE;
+    let second = block_on(sdk.drive(&mut driver, t5));
+    assert!(second.timeline);
+    assert!(!second.feed);
+
+    // At +10m: both timeline (5m since +5m) and feed (10m since t0) must refresh.
+    let t10 = t0 + FEED_STALE;
+    let third = block_on(sdk.drive(&mut driver, t10));
+    assert!(third.timeline);
+    assert!(
+        third.feed,
+        "5m timeline refresh must not starve the 10m feed refresh",
+    );
+
+    // Also verify 5m+1s is not enough for feed if timeline refreshed at 5m.
+    let t11 = t10 + Duration::from_secs(1);
+    let fourth = block_on(sdk.drive(&mut driver, t11));
+    assert!(!fourth.timeline);
+    assert!(!fourth.feed);
+}
+
+#[test]
+fn drive_and_next_wake_respect_exponential_retry_backoff_on_outage() {
+    use crate::scheduler::RETRY_BASE;
+    use std::time::Duration;
+
+    let sdk = Sdk::new(
+        UnavailableBackend,
+        UnavailableBackend,
+        MemoryPersistence::new(),
+        FixedClock::at(1_000),
+    );
+    sdk.adopt_session(signed_in_session());
+    let mut driver = crate::driver::Driver::new();
+    driver.record_stream(crate::scheduler::StreamPhase::Connected);
+    let t0 = web_time::Instant::now();
+
+    // First failure at t0 -> failures = 1, retry_in = 4s.
+    let first = block_on(sdk.drive(&mut driver, t0));
+    assert!(first.failed);
+    assert_eq!(driver.budget().failures, 1);
+
+    // At +1s (MIN_ATTEMPT_GAP), backoff (4s) has NOT elapsed.
+    let t1 = t0 + Duration::from_secs(1);
+    assert_eq!(
+        driver.next_wake(t1),
+        Some(Duration::from_secs(3)),
+        "must wait remaining retry backoff instead of returning Duration::ZERO at 1s",
+    );
+    let at_1s = block_on(sdk.drive(&mut driver, t1));
+    assert!(
+        at_1s.is_empty(),
+        "must not retry after 1s while 4s backoff is active",
+    );
+
+    // At +4s (RETRY_BASE * 2^1), retry is due again -> fails again (failures = 2, retry_in = 8s).
+    let t4 = t0 + RETRY_BASE * 2;
+    assert_eq!(driver.next_wake(t4), Some(Duration::ZERO));
+    let at_4s = block_on(sdk.drive(&mut driver, t4));
+    assert!(at_4s.failed);
+    assert_eq!(driver.budget().failures, 2);
+
+    // At t4 + 4s, still waiting for 8s backoff.
+    let t4_plus_4 = t4 + Duration::from_secs(4);
+    assert_eq!(driver.next_wake(t4_plus_4), Some(Duration::from_secs(4)));
+    assert!(block_on(sdk.drive(&mut driver, t4_plus_4)).is_empty());
+}

@@ -36,7 +36,8 @@ impl Driver {
         Self {
             scheduler: Scheduler::new(),
             budget: Budget {
-                last_success: None,
+                last_timeline_success: None,
+                last_feed_success: None,
                 last_attempt: None,
                 failures: 0,
                 stream: StreamPhase::Idle,
@@ -62,14 +63,48 @@ impl Driver {
         self.budget.last_attempt = Some(now);
     }
 
-    /// Notes that a cycle finished without error: failures reset, so the delays
-    /// shrink back to their bases instead of staying long after recovery.
+    /// Notes that both reads finished without error: failures reset, so the
+    /// delays shrink back to their bases instead of staying long after recovery.
     pub fn record_success(&mut self, now: Instant) {
-        self.budget.last_success = Some(now);
+        self.budget.last_timeline_success = Some(now);
+        self.budget.last_feed_success = Some(now);
         self.budget.failures = 0;
     }
 
-    /// Notes that a cycle failed. The success stamp is deliberately untouched: a
+    /// Notes that a timeline read finished without error and resets failures.
+    pub fn record_timeline_success(&mut self, now: Instant) {
+        self.budget.last_timeline_success = Some(now);
+        self.budget.failures = 0;
+    }
+
+    /// Notes that a feed read finished without error and resets failures.
+    pub fn record_feed_success(&mut self, now: Instant) {
+        self.budget.last_feed_success = Some(now);
+        self.budget.failures = 0;
+    }
+
+    /// Updates per-read success stamps and failure backoff for one drive cycle.
+    pub(crate) fn record_cycle(
+        &mut self,
+        now: Instant,
+        timeline_ok: bool,
+        feed_ok: bool,
+        failed: bool,
+    ) {
+        if timeline_ok {
+            self.budget.last_timeline_success = Some(now);
+        }
+        if feed_ok {
+            self.budget.last_feed_success = Some(now);
+        }
+        if failed {
+            self.record_failure();
+        } else if timeline_ok || feed_ok {
+            self.budget.failures = 0;
+        }
+    }
+
+    /// Notes that a cycle failed. The success stamps are deliberately untouched: a
     /// stale successful read is still the truth about how old the data is.
     pub fn record_failure(&mut self) {
         self.budget.failures = self.budget.failures.saturating_add(1);
@@ -92,7 +127,17 @@ impl Driver {
         if plan.load_timeline || plan.refresh_feed {
             return Some(Duration::ZERO);
         }
-        match (plan.retry_in, plan.reconnect_in) {
+        let retry_in = plan.retry_in.map(|retry| {
+            match self
+                .budget
+                .last_attempt
+                .and_then(|at| now.checked_duration_since(at))
+            {
+                Some(elapsed) if elapsed < retry => retry.saturating_sub(elapsed),
+                _ => retry,
+            }
+        });
+        match (retry_in, plan.reconnect_in) {
             (None, None) => None,
             (Some(retry), None) => Some(retry),
             (None, Some(reconnect)) => Some(reconnect),
