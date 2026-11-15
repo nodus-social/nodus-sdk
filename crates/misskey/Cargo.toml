@@ -18,5 +18,8 @@ serde.workspace = true
 serde_json.workspace = true
 url.workspace = true
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+
 [lints]
 workspace = true
