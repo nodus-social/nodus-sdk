@@ -140,10 +140,21 @@ impl<T: Transport> MisskeyInstance<T> {
         params: &PageParams,
         map: impl Fn(Value) -> Option<U>,
     ) -> Result<Page<U>> {
-        let value = self.call(path, Self::body(params)).await?;
+        self.page_with_body(path, Self::body(params), params, map)
+            .await
+    }
+
+    async fn page_with_body<U>(
+        &self,
+        path: &str,
+        body: Value,
+        params: &PageParams,
+        map: impl Fn(Value) -> Option<U>,
+    ) -> Result<Page<U>> {
+        let value = self.call(path, body).await?;
         let array = value.as_array().cloned().unwrap_or_default();
+        let next = items_next(&array, params);
         let items: Vec<U> = array.into_iter().filter_map(map).collect();
-        let next = items_next(&value);
         Ok(Page::new(items).with_next(next))
     }
 
@@ -156,10 +167,15 @@ impl<T: Transport> MisskeyInstance<T> {
     }
 }
 
-fn items_next(value: &Value) -> Option<String> {
-    value
-        .as_array()
-        .and_then(|items| items.last())
+fn items_next(items: &[Value], params: &PageParams) -> Option<String> {
+    let full = params
+        .limit
+        .is_none_or(|limit| items.len() >= usize::from(limit));
+    if !full {
+        return None;
+    }
+    items
+        .last()
         .and_then(|item| item.get("id"))
         .and_then(Value::as_str)
         .map(str::to_owned)
@@ -195,15 +211,8 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
     async fn tag_timeline(&self, tag: &str, params: PageParams) -> Result<Page<Status>> {
         let mut body = Self::body(&params);
         body["tag"] = json!(tag);
-        let value = self.call("/api/notes/search", body).await?;
-        let items = value
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(convert::status)
-            .collect();
-        Ok(Page::new(items).with_next(items_next(&value)))
+        self.page_with_body("/api/notes/search-by-tag", body, &params, convert::status)
+            .await
     }
 
     async fn status(&self, id: &str) -> Result<Status> {
@@ -244,17 +253,8 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
     }
 
     async fn notifications(&self, params: PageParams) -> Result<Page<Notification>> {
-        let value = self
-            .call("/api/i/notifications", Self::body(&params))
-            .await?;
-        let items = value
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(convert::notification)
-            .collect();
-        Ok(Page::new(items).with_next(items_next(&value)))
+        self.page("/api/i/notifications", &params, convert::notification)
+            .await
     }
 
     async fn account(&self, id: &LocalId) -> Result<Account> {
@@ -279,43 +279,26 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
     async fn account_followers(&self, id: &LocalId, params: PageParams) -> Result<Page<Account>> {
         let mut body = Self::body(&params);
         body["userId"] = json!(id.0);
-        let value = self.call("/api/users/followers", body).await?;
-        let items = value
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|value| convert::account(value.get("follower").unwrap_or(&value)))
-            .collect();
-        Ok(Page::new(items).with_next(items_next(&value)))
+        self.page_with_body("/api/users/followers", body, &params, |value| {
+            convert::account(value.get("follower").unwrap_or(&value))
+        })
+        .await
     }
 
     async fn account_following(&self, id: &LocalId, params: PageParams) -> Result<Page<Account>> {
         let mut body = Self::body(&params);
         body["userId"] = json!(id.0);
-        let value = self.call("/api/users/following", body).await?;
-        let items = value
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|value| convert::account(value.get("followee").unwrap_or(&value)))
-            .collect();
-        Ok(Page::new(items).with_next(items_next(&value)))
+        self.page_with_body("/api/users/following", body, &params, |value| {
+            convert::account(value.get("followee").unwrap_or(&value))
+        })
+        .await
     }
 
     async fn account_statuses(&self, id: &LocalId, params: PageParams) -> Result<Page<Status>> {
         let mut body = Self::body(&params);
         body["userId"] = json!(id.0);
-        let value = self.call("/api/users/notes", body).await?;
-        let items = value
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(convert::status)
-            .collect();
-        Ok(Page::new(items).with_next(items_next(&value)))
+        self.page_with_body("/api/users/notes", body, &params, convert::status)
+            .await
     }
 
     async fn relationship(&self, id: &LocalId) -> Result<Relationship> {
@@ -350,7 +333,7 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
             body["poll"] = json!({
                 "choices": poll.options,
                 "multiple": poll.multiple,
-                "expiresAt": (chrono_now_ms() + u64::from(poll.expires_in) * 1000),
+                "expiredAfter": u64::from(poll.expires_in) * 1000,
             });
         }
         let value = self.call("/api/notes/create", body).await?;
@@ -366,9 +349,210 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
     }
 }
 
-fn chrono_now_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_millis() as u64)
+#[cfg(test)]
+mod tests {
+    use core::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::rc::Rc;
+
+    use nodus_client_core::InstanceApi;
+    use nodus_client_core::model::{Draft, LocalId, PageParams, PollDraft, StreamKind, Visibility};
+
+    use super::*;
+
+    #[derive(Clone)]
+    struct RecordedRequest {
+        url: String,
+        body: Value,
+    }
+
+    #[derive(Clone, Default)]
+    struct MockTransport {
+        requests: Rc<RefCell<Vec<RecordedRequest>>>,
+        responses: Rc<RefCell<VecDeque<HttpResponse>>>,
+    }
+
+    impl MockTransport {
+        fn with_responses(responses: Vec<HttpResponse>) -> Self {
+            Self {
+                requests: Rc::default(),
+                responses: Rc::new(RefCell::new(responses.into())),
+            }
+        }
+    }
+
+    impl Transport for MockTransport {
+        fn send(
+            &self,
+            request: HttpRequest,
+        ) -> impl core::future::Future<Output = Result<HttpResponse>> {
+            let body = request
+                .body
+                .as_deref()
+                .and_then(|bytes| serde_json::from_slice(bytes).ok())
+                .unwrap_or(Value::Null);
+            self.requests.borrow_mut().push(RecordedRequest {
+                url: request.url.to_string(),
+                body,
+            });
+            let response = self
+                .responses
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(HttpResponse {
+                    status: 200,
+                    retry_after_s: None,
+                    body: b"[]".to_vec(),
+                });
+            core::future::ready(Ok(response))
+        }
+    }
+
+    fn instance_with(
+        responses: Vec<HttpResponse>,
+    ) -> (
+        MisskeyInstance<MockTransport>,
+        Rc<RefCell<Vec<RecordedRequest>>>,
+    ) {
+        let transport = MockTransport::with_responses(responses);
+        let requests = Rc::clone(&transport.requests);
+        let instance = Instance::parse("https://misskey.example").expect("valid host");
+        (
+            MisskeyInstance::with_transport(&instance, "token", transport),
+            requests,
+        )
+    }
+
+    fn ok_json(json: &Value) -> HttpResponse {
+        HttpResponse {
+            status: 200,
+            retry_after_s: None,
+            body: json.to_string().into_bytes(),
+        }
+    }
+
+    fn block_on<F: core::future::Future>(future: F) -> F::Output {
+        let mut future = core::pin::pin!(future);
+        let mut context = core::task::Context::from_waker(core::task::Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            core::task::Poll::Ready(output) => output,
+            core::task::Poll::Pending => panic!("the mock transport never pends"),
+        }
+    }
+
+    fn sample_note(id: &str) -> Value {
+        json!({
+            "id": id,
+            "createdAt": "2026-11-12T03:00:00.000Z",
+            "text": "hello",
+            "user": { "id": "u1", "username": "alice" }
+        })
+    }
+
+    #[test]
+    fn post_status_with_poll_uses_relative_expired_after() {
+        let response = json!({
+            "createdNote": sample_note("note-1")
+        });
+        let (client, requests) = instance_with(vec![ok_json(&response)]);
+        let mut draft = Draft::text("pick one", Visibility::Public);
+        draft.poll =
+            Some(PollDraft::new(vec!["A".to_owned(), "B".to_owned()], 3600).multiple(true));
+
+        let _status = block_on(client.post_status(&draft)).expect("post_status");
+        let sent = &requests.borrow()[0];
+        assert_eq!(sent.url, "https://misskey.example/api/notes/create");
+        let poll = &sent.body["poll"];
+        assert_eq!(poll["choices"], json!(["A", "B"]));
+        assert_eq!(poll["multiple"], json!(true));
+        assert_eq!(poll["expiredAfter"], json!(3_600_000));
+        assert!(poll.get("expiresAt").is_none());
+    }
+
+    #[test]
+    fn tag_timeline_calls_search_by_tag_and_omits_cursor_on_short_page() {
+        let notes = json!([sample_note("n1"), sample_note("n2")]);
+        let (client, requests) = instance_with(vec![ok_json(&notes)]);
+
+        let page =
+            block_on(client.tag_timeline("rust", PageParams::first(5))).expect("tag_timeline");
+        let sent = &requests.borrow()[0];
+        assert_eq!(sent.url, "https://misskey.example/api/notes/search-by-tag");
+        assert_eq!(sent.body["tag"], json!("rust"));
+        assert_eq!(sent.body["limit"], json!(5));
+        assert_eq!(page.items.len(), 2);
+        assert_eq!(page.next_max_id, None);
+    }
+
+    #[test]
+    fn pagination_returns_cursor_only_when_page_reaches_limit() {
+        let two_notes = json!([sample_note("n1"), sample_note("n2")]);
+        let two_followers = json!([
+            { "id": "rel1", "follower": { "id": "u1", "username": "alice" } },
+            { "id": "rel2", "follower": { "id": "u2", "username": "bob" } }
+        ]);
+        let two_following = json!([
+            { "id": "rel3", "followee": { "id": "u3", "username": "carol" } },
+            { "id": "rel4", "followee": { "id": "u4", "username": "dave" } }
+        ]);
+        let two_notifications = json!([
+            {
+                "id": "notif1",
+                "type": "follow",
+                "createdAt": "2026-11-12T03:00:00.000Z",
+                "user": { "id": "u1", "username": "alice" }
+            },
+            {
+                "id": "notif2",
+                "type": "follow",
+                "createdAt": "2026-11-12T03:00:00.000Z",
+                "user": { "id": "u2", "username": "bob" }
+            }
+        ]);
+        let (client, _) = instance_with(vec![
+            ok_json(&two_notes),
+            ok_json(&two_notes),
+            ok_json(&two_followers),
+            ok_json(&two_followers),
+            ok_json(&two_following),
+            ok_json(&two_notifications),
+            ok_json(&two_notes),
+        ]);
+
+        // Full page (2 == limit 2) -> has cursor
+        let full_tl =
+            block_on(client.timeline(StreamKind::Local, PageParams::first(2))).expect("tl");
+        assert_eq!(full_tl.next_max_id.as_deref(), Some("n2"));
+
+        // Short page (2 < limit 10) -> no cursor
+        let short_tl =
+            block_on(client.timeline(StreamKind::Local, PageParams::first(10))).expect("tl");
+        assert_eq!(short_tl.next_max_id, None);
+
+        // Followers: full page -> cursor, short page -> None
+        let full_followers =
+            block_on(client.account_followers(&LocalId("u0".to_owned()), PageParams::first(2)))
+                .expect("followers");
+        assert_eq!(full_followers.next_max_id.as_deref(), Some("rel2"));
+
+        let short_followers =
+            block_on(client.account_followers(&LocalId("u0".to_owned()), PageParams::first(5)))
+                .expect("followers");
+        assert_eq!(short_followers.next_max_id, None);
+
+        // Following, notifications, account_statuses short pages -> None
+        let short_following =
+            block_on(client.account_following(&LocalId("u0".to_owned()), PageParams::first(5)))
+                .expect("following");
+        assert_eq!(short_following.next_max_id, None);
+
+        let short_notifs =
+            block_on(client.notifications(PageParams::first(5))).expect("notifications");
+        assert_eq!(short_notifs.next_max_id, None);
+
+        let short_statuses =
+            block_on(client.account_statuses(&LocalId("u0".to_owned()), PageParams::first(5)))
+                .expect("account_statuses");
+        assert_eq!(short_statuses.next_max_id, None);
+    }
 }
