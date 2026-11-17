@@ -243,6 +243,18 @@ impl<T: Transport> RestInstance<T> {
         self.request(Method::Post, url, Some((content_type.to_owned(), body)))
     }
 
+    /// A PUT with a JSON body and the bearer token attached.
+    ///
+    /// Exists for the structured updates (scanner rules, warning presets) that the
+    /// server reads as JSON rather than as a form.
+    pub fn put_body(&self, url: Url, body: Vec<u8>) -> HttpRequest {
+        self.request(
+            Method::Put,
+            url,
+            Some(("application/json".to_owned(), body)),
+        )
+    }
+
     pub fn post_form(&self, url: Url, form: &[(&str, String)]) -> HttpRequest {
         self.request(Method::Post, url, Some(form_body(form)))
     }
@@ -274,6 +286,17 @@ impl<T: Transport> RestInstance<T> {
     pub async fn send_empty(&self, request: HttpRequest) -> Result<()> {
         let response = self.transport.send(request).await?;
         check_status(&response)
+    }
+
+    /// Sends a request and returns the body untouched.
+    ///
+    /// Only the scanner asset download answers with something other than JSON, and it is
+    /// the only caller: decoding it as a string would mangle the bytes and decoding it as
+    /// JSON would fail.
+    pub async fn fetch_bytes(&self, request: HttpRequest) -> Result<Vec<u8>> {
+        let response = self.transport.send(request).await?;
+        check_status(&response)?;
+        Ok(response.body)
     }
 
     /// Fetches a page, deriving the older-cursor from the last item's id.
