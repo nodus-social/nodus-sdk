@@ -248,6 +248,62 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_topology_node_without_an_answer_is_dead() {
+        let topology: Topology = serde_json::from_value(serde_json::json!({
+            "version": "0.1.0",
+            "nodes": [
+                {
+                    "name": "api",
+                    "transport": "unix",
+                    "endpoint": "/run/nodus/api.sock",
+                    "status": "healthy",
+                    "version": "0.1.0",
+                    "uptime_seconds": 90,
+                    "cpu_usage_percent": 1.5,
+                    "rss_bytes": 4096,
+                    "latency_ms": 2,
+                    "version_mismatch": false
+                },
+                {
+                    "name": "scan",
+                    "transport": "http",
+                    "endpoint": "http://10.0.1.4:50051",
+                    "status": "dead",
+                    "uptime_seconds": 0,
+                    "cpu_usage_percent": 0.0,
+                    "rss_bytes": 0,
+                    "latency_ms": 250,
+                    "last_seen_at": "2026-05-01T00:00:00Z",
+                    "last_error": "connection refused"
+                }
+            ]
+        }))
+        .expect("a topology decodes");
+        assert_eq!(topology.nodes.len(), 2);
+        assert!(topology.nodes[0].is_up());
+        assert_eq!(topology.nodes[0].queue_depth, None);
+        assert!(!topology.nodes[1].is_up());
+        assert_eq!(topology.nodes[1].status, NodeStatus::Dead);
+        assert_eq!(
+            topology.nodes[1].last_error.as_deref(),
+            Some("connection refused")
+        );
+    }
+
+    #[test]
+    fn a_log_entry_compares_its_own_level() {
+        let entry = NodeLog {
+            timestamp: "2026-05-01T00:00:00Z".to_owned(),
+            level: "warn".to_owned(),
+            target: "nodus_server".to_owned(),
+            message: "slow".to_owned(),
+        };
+        assert!(entry.at_least("info"));
+        assert!(entry.at_least("warn"));
+        assert!(!entry.at_least("error"));
+    }
+
+    #[test]
     fn an_account_without_a_domain_is_local() {
         let account: AdminAccount = serde_json::from_value(serde_json::json!({
             "id": "1",
@@ -1276,4 +1332,80 @@ pub struct AdminAlert {
     pub acknowledged_at: Option<String>,
     #[serde(default)]
     pub acknowledged_by: Option<String>,
+}
+
+/// One process of this instance, as it answered a quarter of a second ago.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TopologyNode {
+    pub name: String,
+    /// `unix` or `http`: how the instance reached it.
+    pub transport: String,
+    /// The socket path or URL it was asked at.
+    pub endpoint: String,
+    pub status: NodeStatus,
+    #[serde(default)]
+    pub version: Option<String>,
+    pub uptime_seconds: u64,
+    pub cpu_usage_percent: f64,
+    pub rss_bytes: u64,
+    #[serde(default)]
+    pub queue_depth: Option<u64>,
+    pub latency_ms: u64,
+    #[serde(default)]
+    pub last_seen_at: Option<String>,
+    #[serde(default)]
+    pub last_error: Option<String>,
+    /// Whether this node runs a different build than the one that answered.
+    #[serde(default)]
+    pub version_mismatch: bool,
+}
+
+impl TopologyNode {
+    /// Whether this node is answering.
+    #[must_use]
+    pub fn is_up(&self) -> bool {
+        self.status != NodeStatus::Dead
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum NodeStatus {
+    Healthy,
+    Degraded,
+    Dead,
+}
+
+/// Every node the instance knows about, answered by the process that serves the API.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Topology {
+    pub version: String,
+    pub nodes: Vec<TopologyNode>,
+}
+
+/// One line a node kept in memory.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NodeLog {
+    pub timestamp: String,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+}
+
+impl NodeLog {
+    /// Whether this entry is at or above `level` (`trace`, `debug`, `info`, `warn`, `error`).
+    #[must_use]
+    pub fn at_least(&self, level: &str) -> bool {
+        rank(&self.level) >= rank(level)
+    }
+}
+
+fn rank(level: &str) -> u8 {
+    match level {
+        "trace" => 0,
+        "debug" => 1,
+        "warn" => 3,
+        "error" => 4,
+        _ => 2,
+    }
 }

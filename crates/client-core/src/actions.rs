@@ -26,9 +26,10 @@ use crate::model::{
     Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome,
     DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft, FlagState,
     HistoryEntry, InstanceInfo, Language, List, LocalId, MediaAttachment, ModerationAction,
-    NewScanner, Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft,
+    NewScanner, NodeLog, Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft,
     ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner,
-    ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Tag, WarningPreset,
+    ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Tag, Topology,
+    WarningPreset,
 };
 
 /// Things done to a status.
@@ -685,6 +686,23 @@ pub trait AdminActions {
 
     /// Withdraw an announcement. Requires `admin:write`.
     fn delete_announcement(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Every process this instance knows about, and how it is doing right now.
+    ///
+    /// The answer is assembled from live calls bounded at a quarter of a second, so a node
+    /// that is down lengthens the answer by that budget rather than by a timeout.
+    /// Requires `admin:read`.
+    fn topology(&self) -> impl Future<Output = Result<Topology, Self::Error>>;
+
+    /// The last entries one node kept in memory, oldest first.
+    ///
+    /// Nothing is stored: a restart of that node empties this. Requires `admin:read`.
+    fn node_logs(
+        &self,
+        name: &str,
+        min_level: &str,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<NodeLog>, Self::Error>>;
 }
 
 /// What the account asked for, and what the instance wants said.

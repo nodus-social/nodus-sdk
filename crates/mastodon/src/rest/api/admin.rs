@@ -17,9 +17,9 @@ use crate::model::{
     AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
     AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
     DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome, DomainSeverity,
-    EmailDomainBlock, FlagState, ModerationAction, NewScanner, Report, ReportDraft, ReportFilter,
-    ReportState, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset, ScannerRule,
-    WarningPreset,
+    EmailDomainBlock, FlagState, ModerationAction, NewScanner, NodeLog, Report, ReportDraft,
+    ReportFilter, ReportState, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset,
+    ScannerRule, Topology, WarningPreset,
 };
 use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
@@ -571,6 +571,20 @@ impl<T: Transport> AdminActions for RestInstance<T> {
         let url = self.url_segments(&["api", "v1", "admin", "announcements", id])?;
         self.send_empty(self.delete(url)).await
     }
+
+    async fn topology(&self) -> Result<Topology> {
+        let url = self.url("/api/v1/admin/topology")?;
+        self.fetch(self.get(url)).await
+    }
+
+    async fn node_logs(&self, name: &str, min_level: &str, limit: u16) -> Result<Vec<NodeLog>> {
+        let url = self.url_segments(&["api", "v1", "admin", "topology", name, "logs"])?;
+        let pairs = [
+            ("min_level", min_level.to_owned()),
+            ("limit", limit.to_string()),
+        ];
+        self.fetch(self.get(with_query(url, &pairs))).await
+    }
 }
 
 /// Encodes an announcement as the server's form extractor reads it.
@@ -591,6 +605,7 @@ fn announcement_form(draft: &AnnouncementDraft) -> Vec<(&'static str, String)> {
     }
     form
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -765,6 +780,29 @@ mod tests {
             !body.contains("ends_at"),
             "an unset date must be omitted: {body}"
         );
+    }
+
+    #[test]
+    fn the_topology_is_read_from_the_admin_surface() {
+        let (instance, seen) = instance();
+        let _ = block_on(instance.topology());
+        let (method, url, _) = seen.borrow()[0].clone();
+        assert_eq!(method, "GET");
+        assert!(
+            url.starts_with("https://mastodon.example/api/v1/admin/topology"),
+            "{url}"
+        );
+    }
+
+    #[test]
+    fn node_logs_name_the_node_in_the_path() {
+        let (instance, seen) = instance();
+        let _ = block_on(instance.node_logs("scan", "warn", 50));
+        let (method, url, _) = seen.borrow()[0].clone();
+        assert_eq!(method, "GET");
+        assert!(url.contains("/api/v1/admin/topology/scan/logs?"), "{url}");
+        assert!(url.contains("min_level=warn"), "{url}");
+        assert!(url.contains("limit=50"), "{url}");
     }
 
     #[test]
