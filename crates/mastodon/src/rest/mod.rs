@@ -181,12 +181,19 @@ impl<T: Transport> RestInstance<T> {
         Ok(url)
     }
 
-    /// Builds a request with the bearer token attached.
+    /// Builds a request, with the bearer token attached when there is one.
+    ///
+    /// A reader who is not signed in reads public pages through this client with an empty
+    /// token: sending `Bearer ` with nothing after it is a malformed credential, and an
+    /// instance that checks it answers `401` where the same read needs no credential at all.
     fn request(&self, method: Method, url: Url, body: Option<(String, Vec<u8>)>) -> HttpRequest {
-        let mut headers = vec![(
-            "Authorization".to_owned(),
-            format!("Bearer {}", self.token.expose()),
-        )];
+        let mut headers = Vec::new();
+        if !self.token.expose().is_empty() {
+            headers.push((
+                "Authorization".to_owned(),
+                format!("Bearer {}", self.token.expose()),
+            ));
+        }
         if let Some((content_type, body)) = body {
             headers.push(("Content-Type".to_owned(), content_type));
             return HttpRequest {
@@ -484,6 +491,31 @@ mod tests {
         ) -> impl core::future::Future<Output = Result<HttpResponse>> {
             core::future::ready(Err(Error::Transport("unused".to_owned())))
         }
+    }
+
+    #[test]
+    fn a_read_without_a_token_carries_no_authorization_header() {
+        let instance = Instance::parse("https://nodus.example").expect("valid instance");
+        let anonymous = RestInstance::with_transport(&instance, "", DummyTransport);
+        let read = anonymous.get(
+            Url::parse("https://nodus.example/api/v1/accounts/1/statuses").expect("valid url"),
+        );
+        assert!(
+            read.headers.iter().all(|(name, _)| name != "Authorization"),
+            "an anonymous read must not present an empty credential"
+        );
+
+        let signed_in = RestInstance::with_transport(&instance, "secret-token", DummyTransport);
+        let read = signed_in.get(
+            Url::parse("https://nodus.example/api/v1/accounts/1/statuses").expect("valid url"),
+        );
+        assert_eq!(
+            read.headers
+                .iter()
+                .find(|(name, _)| name == "Authorization")
+                .map(|(_, value)| value.as_str()),
+            Some("Bearer secret-token")
+        );
     }
 
     #[test]
