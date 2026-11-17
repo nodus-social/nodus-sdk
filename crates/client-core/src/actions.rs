@@ -21,11 +21,14 @@ use core::fmt::Debug;
 use core::future::Future;
 
 use crate::model::{
-    Account, AdminAccount, AdminMeasure, Announcement, AnnouncementDraft, AuditEntry, Conversation,
-    CustomEmoji, DomainAllow, DomainBlock, DomainSeverity, Draft, FeaturedTag, Filter, FilterDraft,
-    HistoryEntry, InstanceInfo, Language, List, LocalId, MediaAttachment, ModerationAction, Page,
-    PageParams, Poll, Preferences, Relationship, Report, ReportState, Rule, ScheduledStatus,
-    SearchResults, Status, Tag,
+    Account, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
+    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
+    Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome,
+    DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft, FlagState,
+    HistoryEntry, InstanceInfo, Language, List, LocalId, MediaAttachment, ModerationAction,
+    NewScanner, Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft,
+    ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner,
+    ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Tag, WarningPreset,
 };
 
 /// Things done to a status.
@@ -343,50 +346,190 @@ pub trait AdminActions {
     /// Error type of the transport.
     type Error: Debug;
 
-    /// Reports waiting for a decision, or already decided.
+    /// Reports waiting for a decision, or already decided. Requires `admin:read`.
     fn reports(
         &self,
         state: ReportState,
         limit: u16,
     ) -> impl Future<Output = Result<Vec<Report>, Self::Error>>;
 
-    /// Mark a report as handled.
+    /// One page of the queue, narrowed by whatever the filter names. Requires `admin:read`.
+    fn reports_page(
+        &self,
+        filter: &ReportFilter,
+    ) -> impl Future<Output = Result<Vec<Report>, Self::Error>>;
+
+    /// One report with its accounts and statuses filled in. Requires `admin:read`.
+    fn report(&self, id: &str) -> impl Future<Output = Result<Report, Self::Error>>;
+
+    /// Mark a report as handled. Requires `admin:write`.
     fn resolve_report(&self, id: &str) -> impl Future<Output = Result<Report, Self::Error>>;
 
-    /// Reopen a handled report.
+    /// Mark a report as handled, recording why.
+    ///
+    /// The note is the decision's only memory once the queue has moved on, which is why it
+    /// travels with the resolve rather than in a follow-up note. Requires `admin:write`.
+    fn resolve_report_with_note(
+        &self,
+        id: &str,
+        note: &str,
+    ) -> impl Future<Output = Result<Report, Self::Error>>;
+
+    /// Reopen a handled report. Requires `admin:write`.
     fn reopen_report(&self, id: &str) -> impl Future<Output = Result<Report, Self::Error>>;
 
-    /// Accounts, newest first, optionally only local ones.
+    /// Claim a report for `account_id`, or pass `None` to put it back in the unclaimed
+    /// queue. Requires `admin:write`.
+    fn assign_report(
+        &self,
+        id: &str,
+        account_id: Option<&str>,
+    ) -> impl Future<Output = Result<Report, Self::Error>>;
+
+    /// File a report. Any signed-in account may do this; no admin scope is needed.
+    fn create_report(
+        &self,
+        draft: &ReportDraft,
+    ) -> impl Future<Output = Result<Report, Self::Error>>;
+
+    /// Accounts, newest first, optionally only local ones. Requires `admin:read`.
     fn admin_accounts(
         &self,
         local: bool,
         limit: u16,
     ) -> impl Future<Output = Result<Vec<AdminAccount>, Self::Error>>;
 
-    /// Apply a decision to one account.
+    /// The account directory, narrowed by origin, standing, name, mail or domain.
+    /// Requires `admin:read`.
+    fn search_accounts(
+        &self,
+        query: &AdminAccountQuery,
+    ) -> impl Future<Output = Result<Vec<AdminAccount>, Self::Error>>;
+
+    /// Apply a decision to one account. Requires `admin:write`.
     fn moderate_account(
         &self,
         id: &str,
         action: ModerationAction,
     ) -> impl Future<Output = Result<AdminAccount, Self::Error>>;
 
-    /// Domains the instance refuses.
+    /// Apply a decision, recording why and optionally resolving the report behind it.
+    ///
+    /// One call rather than three, because a moderator who silences an account and then
+    /// fails to write the note has made a decision nobody can review. Requires
+    /// `admin:write`.
+    fn moderate_account_with_note(
+        &self,
+        id: &str,
+        action: ModerationAction,
+        note: &str,
+        report_id: Option<&str>,
+    ) -> impl Future<Output = Result<AdminAccount, Self::Error>>;
+
+    /// Grant or revoke administrator rights. Requires `admin:write`.
+    fn set_staff(
+        &self,
+        id: &str,
+        staff: bool,
+    ) -> impl Future<Output = Result<AdminAccount, Self::Error>>;
+
+    /// One account with its notes, scanner flags and report count. Requires `admin:read`.
+    fn account_detail(&self, id: &str) -> impl Future<Output = Result<AccountDetail, Self::Error>>;
+
+    /// Add a private note to an account. Requires `admin:write`.
+    fn add_account_note(
+        &self,
+        id: &str,
+        body: &str,
+    ) -> impl Future<Output = Result<AccountNote, Self::Error>>;
+
+    /// Delete one of an account's notes. Requires `admin:write`.
+    fn delete_account_note(
+        &self,
+        id: &str,
+        note_id: &str,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Delete the account and everything it owns. Irreversible, so the caller must mean
+    /// it: the server refuses the signed-in account and any administrator.
+    /// Requires `admin:write`.
+    fn purge_account(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Allow or refuse lossless uploads from one account. Requires `admin:write`.
+    fn set_lossless(
+        &self,
+        id: &str,
+        images: bool,
+        videos: bool,
+    ) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Domains the instance refuses. Requires `admin:read`.
     fn domain_blocks(
         &self,
         limit: u16,
     ) -> impl Future<Output = Result<Vec<DomainBlock>, Self::Error>>;
 
-    /// Refuse a domain.
+    /// Refuse a domain. Requires `admin:write`.
     fn create_domain_block(
         &self,
         domain: &str,
         severity: DomainSeverity,
     ) -> impl Future<Output = Result<DomainBlock, Self::Error>>;
 
-    /// Stop refusing a domain.
+    /// Replace a block's domain, severity and flags.
+    ///
+    /// The whole block travels, not a patch: the server would read an omitted field as
+    /// "clear it". Requires `admin:write`.
+    fn update_domain_block(
+        &self,
+        id: &str,
+        draft: &DomainBlockDraft,
+    ) -> impl Future<Output = Result<DomainBlock, Self::Error>>;
+
+    /// Stop refusing a domain. Requires `admin:write`.
     fn delete_domain_block(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Block many domains at one severity, answering what was blocked and what was not a
+    /// domain at all. Requires `admin:write`.
+    fn import_domain_blocks(
+        &self,
+        domains: &[&str],
+        severity: DomainSeverity,
+    ) -> impl Future<Output = Result<DomainImportOutcome, Self::Error>>;
+
+    /// Domains allowed through a general block. Requires `admin:read`.
+    fn domain_allows(
+        &self,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<DomainAllow>, Self::Error>>;
+
+    /// Carve one domain back out of a block. Requires `admin:write`.
+    fn create_domain_allow(
+        &self,
+        domain: &str,
+    ) -> impl Future<Output = Result<DomainAllow, Self::Error>>;
+
+    /// Stop allowing a domain through. Requires `admin:write`.
+    fn delete_domain_allow(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Mail domains registrations are refused from. Requires `admin:read`.
+    fn email_domain_blocks(
+        &self,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<EmailDomainBlock>, Self::Error>>;
+
+    /// Refuse registrations from a mail domain. Requires `admin:write`.
+    fn create_email_domain_block(
+        &self,
+        domain: &str,
+        allow_registration: bool,
+    ) -> impl Future<Output = Result<EmailDomainBlock, Self::Error>>;
+
+    /// Stop refusing a mail domain. Requires `admin:write`.
+    fn delete_email_domain_block(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
     /// Dashboard counts for the given keys (`new_users`, `interactions`, …) between two
-    /// dates, both `YYYY-MM-DD`.
+    /// dates, both `YYYY-MM-DD`. Requires `admin:read`.
     fn measures(
         &self,
         keys: &[&str],
@@ -396,38 +539,152 @@ pub trait AdminActions {
     // Relays are deliberately absent: Mastodon documents no relay endpoint
     // (`/methods/admin/relays/` is itself a 404) and `/api/v1/admin/relays` answers the
     // instance's HTML 404 page. Following a relay is a web-UI action only.
-    /// The most recent administrative actions.
+    /// The most recent administrative actions. Requires `admin:read`.
     fn audit(&self, limit: u16) -> impl Future<Output = Result<Vec<AuditEntry>, Self::Error>>;
 
-    /// Every announcement, published or not, for staff.
+    /// Who the grant belongs to, what it may do, and how much is waiting. Requires
+    /// `admin:read`.
+    fn admin_meta(&self) -> impl Future<Output = Result<AdminMeta, Self::Error>>;
+
+    /// The flat counts behind the overview screen. Requires `admin:read`.
+    fn admin_overview(&self) -> impl Future<Output = Result<AdminOverview, Self::Error>>;
+
+    /// What the instance noticed, most recent first. Requires `admin:read`.
+    fn admin_alerts(
+        &self,
+        unacknowledged: bool,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<AdminAlert>, Self::Error>>;
+
+    /// Record that an alert has been seen. Requires `admin:write`.
+    fn acknowledge_alert(&self, id: &str) -> impl Future<Output = Result<AdminAlert, Self::Error>>;
+
+    /// The registered scanner services, with their rules. Requires `admin:read`.
+    fn scanners(&self) -> impl Future<Output = Result<Vec<Scanner>, Self::Error>>;
+
+    /// Register a scanner service. Requires `admin:write`.
+    fn create_scanner(
+        &self,
+        scanner: &NewScanner,
+    ) -> impl Future<Output = Result<Scanner, Self::Error>>;
+
+    /// Replace a scanner's settings. Requires `admin:write`.
+    fn update_scanner(
+        &self,
+        id: &str,
+        scanner: &NewScanner,
+    ) -> impl Future<Output = Result<Scanner, Self::Error>>;
+
+    /// Unregister a scanner. Requires `admin:write`.
+    fn delete_scanner(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Ask a scanner what it can report and store the answer.
+    ///
+    /// Deliberately a button and not something a failed sweep retries: this is the only
+    /// place the instance believes a service about itself, so it must be someone's
+    /// decision. Requires `admin:write`.
+    fn refresh_scanner(&self, id: &str) -> impl Future<Output = Result<Scanner, Self::Error>>;
+
+    /// Decide what one label means at or above one threshold. Requires `admin:write`.
+    fn set_scanner_rule(
+        &self,
+        scanner_id: &str,
+        label: &str,
+        threshold: f64,
+        severity: ScanSeverity,
+    ) -> impl Future<Output = Result<ScannerRule, Self::Error>>;
+
+    /// Forget a rule, leaving the scanner's other labels alone. Requires `admin:write`.
+    fn delete_scanner_rule(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// The content sets this instance holds. Requires `admin:read`.
+    fn scanner_assets(&self) -> impl Future<Output = Result<Vec<ScannerAsset>, Self::Error>>;
+
+    /// Upload a content set; the server computes the digest scanners verify against.
+    /// Requires `admin:write`.
+    fn upload_scanner_asset(
+        &self,
+        asset: &AssetUpload,
+    ) -> impl Future<Output = Result<ScannerAsset, Self::Error>>;
+
+    /// Delete a content set no scanner points at. Requires `admin:write`.
+    fn delete_scanner_asset(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// The bytes of one content set, for checking what a service received.
+    /// Requires `admin:read`.
+    fn download_scanner_asset(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<Vec<u8>, Self::Error>>;
+
+    /// Scan results a moderator has to judge. `state` of `None` asks for all of them.
+    /// Requires `admin:read`.
+    fn scan_flags(
+        &self,
+        state: Option<FlagState>,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<ScanFlag>, Self::Error>>;
+
+    /// Record a moderator's verdict on a flag; the scan itself stays. Requires
+    /// `admin:write`.
+    fn resolve_scan_flag(
+        &self,
+        id: &str,
+        state: FlagState,
+    ) -> impl Future<Output = Result<ScanFlag, Self::Error>>;
+
+    /// Scans waiting, running or finished. `state` is one of `pending`, `running`, `done`
+    /// or `failed`, or `None` for every state. Requires `admin:read`.
+    fn scan_queue(
+        &self,
+        state: Option<&str>,
+        limit: u16,
+    ) -> impl Future<Output = Result<Vec<Scan>, Self::Error>>;
+
+    /// Queue a subject by hand, answering how many scanners picked it up. Requires
+    /// `admin:write`.
+    fn enqueue_scan(&self, request: &ScanRequest)
+    -> impl Future<Output = Result<u64, Self::Error>>;
+
+    /// Warnings a moderator can reuse. Requires `admin:read`.
+    fn warning_presets(&self) -> impl Future<Output = Result<Vec<WarningPreset>, Self::Error>>;
+
+    /// Save a new warning preset. Requires `admin:write`.
+    fn create_warning_preset(
+        &self,
+        title: &str,
+        text: &str,
+    ) -> impl Future<Output = Result<WarningPreset, Self::Error>>;
+
+    /// Replace a preset's title and text. Requires `admin:write`.
+    fn update_warning_preset(
+        &self,
+        id: &str,
+        title: &str,
+        text: &str,
+    ) -> impl Future<Output = Result<WarningPreset, Self::Error>>;
+
+    /// Delete a preset. Requires `admin:write`.
+    fn delete_warning_preset(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Every announcement, published or not, for staff. Requires `admin:read`.
     fn admin_announcements(&self) -> impl Future<Output = Result<Vec<Announcement>, Self::Error>>;
 
-    /// Publish a new announcement.
+    /// Publish a new announcement. Requires `admin:write`.
     fn create_announcement(
         &self,
         draft: AnnouncementDraft,
     ) -> impl Future<Output = Result<Announcement, Self::Error>>;
 
-    /// Replace an announcement's fields.
+    /// Replace an announcement's fields. Requires `admin:write`.
     fn update_announcement(
         &self,
         id: &str,
         draft: AnnouncementDraft,
     ) -> impl Future<Output = Result<Announcement, Self::Error>>;
 
-    /// Withdraw an announcement.
+    /// Withdraw an announcement. Requires `admin:write`.
     fn delete_announcement(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
-
-    /// Domains allowed through a general block.
-    fn domain_allows(
-        &self,
-        limit: u16,
-    ) -> impl Future<Output = Result<Vec<DomainAllow>, Self::Error>>;
-    fn create_domain_allow(
-        &self,
-        domain: &str,
-    ) -> impl Future<Output = Result<DomainAllow, Self::Error>>;
-    fn delete_domain_allow(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 /// What the account asked for, and what the instance wants said.
