@@ -22,7 +22,7 @@ pub use admin::{
     DomainSeverity, EmailDomainBlock, FlagState, MeasurePoint, ModerationAction, NewScanner,
     NodeLog, NodeStatus, Report, ReportDraft, ReportFilter, ReportState, Scan, ScanFlag,
     ScanRequest, ScanSeverity, Scanner, ScannerAsset, ScannerKind, ScannerRule, ScanningSummary,
-    SeverityCount, Topology, TopologyNode, WarningPreset,
+    SeverityCount, Topology, TopologyNode, TriggerOutcome, WarningPreset,
 };
 pub use filter::{Filter, FilterAction, FilterContext, FilterDraft, FilterKeyword, Verdict, judge};
 pub use highlights::{FeaturedTag, Rule};

@@ -29,7 +29,7 @@ use crate::model::{
     NewScanner, NodeLog, Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft,
     ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner,
     ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Tag, Topology,
-    WarningPreset,
+    TriggerOutcome, WarningPreset,
 };
 
 /// Things done to a status.
@@ -703,6 +703,16 @@ pub trait AdminActions {
         min_level: &str,
         limit: u16,
     ) -> impl Future<Output = Result<Vec<NodeLog>, Self::Error>>;
+
+    /// Asks one process to do its pass now instead of on its next tick (`admin:write`).
+    ///
+    /// `work` names the pass, and a process accepts only the name it does: `scan`, `prune`
+    /// or `calc`. The durable path to a worker is still its queue.
+    fn trigger_node(
+        &self,
+        name: &str,
+        work: &str,
+    ) -> impl Future<Output = Result<TriggerOutcome, Self::Error>>;
 }
 
 /// What the account asked for, and what the instance wants said.

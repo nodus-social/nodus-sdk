@@ -19,7 +19,7 @@ use crate::model::{
     DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome, DomainSeverity,
     EmailDomainBlock, FlagState, ModerationAction, NewScanner, NodeLog, Report, ReportDraft,
     ReportFilter, ReportState, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset,
-    ScannerRule, Topology, WarningPreset,
+    ScannerRule, Topology, TriggerOutcome, WarningPreset,
 };
 use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
@@ -585,6 +585,18 @@ impl<T: Transport> AdminActions for RestInstance<T> {
         ];
         self.fetch(self.get(with_query(url, &pairs))).await
     }
+
+    async fn trigger_node(&self, name: &str, work: &str) -> Result<TriggerOutcome> {
+        let name = name.to_owned();
+        let work = work.to_owned();
+        let url = self.url_segments(&["api", "v1", "admin", "topology", &name, "trigger"])?;
+        let request = serde_json::json!({ "work": work });
+        let body = json_body(&request)?;
+        let outcome = self
+            .fetch(self.post_body(url, "application/json", body))
+            .await?;
+        Ok(outcome)
+    }
 }
 
 /// Encodes an announcement as the server's form extractor reads it.
@@ -605,7 +617,6 @@ fn announcement_form(draft: &AnnouncementDraft) -> Vec<(&'static str, String)> {
     }
     form
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -803,6 +814,20 @@ mod tests {
         assert!(url.contains("/api/v1/admin/topology/scan/logs?"), "{url}");
         assert!(url.contains("min_level=warn"), "{url}");
         assert!(url.contains("limit=50"), "{url}");
+    }
+
+    #[test]
+    fn a_trigger_names_the_process_and_the_pass() {
+        let (instance, seen) = instance();
+        let _ = block_on(instance.trigger_node("prune", "prune"));
+        let (method, url, body) = seen.borrow()[0].clone();
+        assert_eq!(method, "POST");
+        assert!(
+            url.ends_with("/api/v1/admin/topology/prune/trigger"),
+            "{url}"
+        );
+        let body = body.expect("a trigger carries a body");
+        assert!(body.contains("\"work\":\"prune\""), "{body}");
     }
 
     #[test]

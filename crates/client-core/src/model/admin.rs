@@ -9,6 +9,18 @@ use serde::{Deserialize, Serialize};
 
 use super::{Account, Status};
 
+/// What a process answered when asked to do its pass now.
+///
+/// The durable path to a worker is its queue; this is the impatient one, and its answer is
+/// meant to be read by a person.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerOutcome {
+    /// True when the process queued the pass.
+    pub accepted: bool,
+    /// What the process said about the request.
+    pub detail: String,
+}
+
 /// A report, as the queue returns it.
 ///
 /// The queue hydrates everything triage needs — the reporter, the reported account, the
