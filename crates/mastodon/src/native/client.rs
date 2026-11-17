@@ -86,7 +86,7 @@ impl Transport for ReqwestTransport {
         let response = builder
             .send()
             .await
-            .map_err(|e| Error::Transport(e.to_string()))?;
+            .map_err(|e| Error::Transport(format_reqwest_error(&e)))?;
         let status = response.status().as_u16();
         let retry_after_s = response
             .headers()
@@ -96,7 +96,7 @@ impl Transport for ReqwestTransport {
         let body = response
             .bytes()
             .await
-            .map_err(|e| Error::Transport(e.to_string()))?
+            .map_err(|e| Error::Transport(format_reqwest_error(&e)))?
             .to_vec();
         Ok(HttpResponse {
             status,
@@ -104,6 +104,23 @@ impl Transport for ReqwestTransport {
             body,
         })
     }
+}
+
+/// Formats a `reqwest::Error` together with its `Error::source()` chain so
+/// callers see why a request failed (DNS, TLS, connect, timeout) rather than
+/// only `error sending request for url (...)`.
+fn format_reqwest_error(err: &reqwest::Error) -> String {
+    use core::fmt::Write;
+    let mut out = err.to_string();
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        let msg = cause.to_string();
+        if !out.contains(&msg) {
+            let _ = write!(out, ": {msg}");
+        }
+        source = cause.source();
+    }
+    out
 }
 
 /// The native instance handle: the shared endpoint implementation over [`ReqwestTransport`].

@@ -156,7 +156,7 @@ impl<T: Transport> AccountActions for RestInstance<T> {
     }
 
     async fn update_profile(&self, update: &crate::model::ProfileUpdate) -> Result<Account> {
-        let mut form: Vec<(&str, String)> = Vec::with_capacity(5);
+        let mut form: Vec<(&str, String)> = Vec::with_capacity(7);
         if let Some(display_name) = &update.display_name {
             form.push(("display_name", display_name.clone()));
         }
@@ -171,6 +171,12 @@ impl<T: Transport> AccountActions for RestInstance<T> {
         }
         if let Some(discoverable) = update.discoverable {
             form.push(("discoverable", discoverable.to_string()));
+        }
+        if let Some(avatar) = &update.avatar {
+            form.push(("avatar", avatar.clone()));
+        }
+        if let Some(header) = &update.header {
+            form.push(("header", header.clone()));
         }
         let url = self.url("/api/v1/accounts/update_credentials")?;
         self.fetch(self.patch_form(url, &form)).await

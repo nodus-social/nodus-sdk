@@ -291,6 +291,8 @@ fn update_profile_sends_bot_and_discoverable_fields() {
         locked: Some(true),
         bot: Some(true),
         discoverable: Some(false),
+        avatar: None,
+        header: None,
     };
 
     block_on(instance.update_profile(&update)).expect("update_profile");
@@ -302,6 +304,20 @@ fn update_profile_sends_bot_and_discoverable_fields() {
     assert!(pairs.contains(&("locked".to_owned(), "true".to_owned())));
     assert!(pairs.contains(&("bot".to_owned(), "true".to_owned())));
     assert!(pairs.contains(&("discoverable".to_owned(), "false".to_owned())));
+}
+
+#[test]
+fn update_profile_sends_uploaded_pictures_by_id() {
+    let (instance, requests) = instance_with(vec![ok_json(MINIMAL_ACCOUNT_JSON)]);
+    let update = ProfileUpdate::new().avatar("media-1").header("media-2");
+
+    block_on(instance.update_profile(&update)).expect("update_profile");
+
+    let recorded = requests.borrow();
+    let pairs = recorded[0].form_pairs();
+    assert!(pairs.contains(&("avatar".to_owned(), "media-1".to_owned())));
+    assert!(pairs.contains(&("header".to_owned(), "media-2".to_owned())));
+    assert!(!pairs.iter().any(|(key, _)| key == "display_name"));
 }
 
 #[test]

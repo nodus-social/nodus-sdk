@@ -25,7 +25,7 @@ use crate::model::{
     CustomEmoji, DomainAllow, DomainBlock, DomainSeverity, Draft, FeaturedTag, Filter, FilterDraft,
     HistoryEntry, InstanceInfo, Language, List, LocalId, MediaAttachment, ModerationAction, Page,
     PageParams, Poll, Preferences, Relationship, Report, ReportState, Rule, ScheduledStatus,
-    SearchResults, Status,
+    SearchResults, Status, Tag,
 };
 
 /// Things done to a status.
@@ -485,6 +485,21 @@ pub trait InstanceMeta {
 
     /// The languages this instance publishes posts in.
     fn languages(&self) -> impl Future<Output = Result<Vec<Language>, Self::Error>>;
+
+    /// Tags this instance is promoting, busiest first.
+    ///
+    /// Readable without a token: it is what a visitor sees on the front page, and it is
+    /// what a reader's own rail shows when they ask for "what is happening here".
+    fn trending_tags(&self, limit: usize) -> impl Future<Output = Result<Vec<Tag>, Self::Error>>;
+
+    /// Posts this instance is promoting, in the instance's order.
+    ///
+    /// The ranking is the instance's, not this client's: a reader who wanted our own idea
+    /// of interesting would be reading the recommender tab instead.
+    fn trending_statuses(
+        &self,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<Status>, Self::Error>>;
 }
 
 /// Featured tags, and the instance's rules.

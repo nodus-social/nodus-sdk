@@ -300,6 +300,10 @@ pub struct ProfileUpdate {
     pub bot: Option<bool>,
     /// Whether the account may appear in discovery.
     pub discoverable: Option<bool>,
+    /// The profile picture, as the id of an image already uploaded to the instance.
+    pub avatar: Option<String>,
+    /// The banner, as the id of an image already uploaded to the instance.
+    pub header: Option<String>,
 }
 
 impl ProfileUpdate {
@@ -330,6 +334,20 @@ impl ProfileUpdate {
         self
     }
 
+    /// Sets the profile picture from an uploaded image.
+    #[must_use]
+    pub fn avatar(mut self, media_id: impl Into<String>) -> Self {
+        self.avatar = Some(media_id.into());
+        self
+    }
+
+    /// Sets the banner from an uploaded image.
+    #[must_use]
+    pub fn header(mut self, media_id: impl Into<String>) -> Self {
+        self.header = Some(media_id.into());
+        self
+    }
+
     /// Whether the result says anything at all.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -338,5 +356,7 @@ impl ProfileUpdate {
             && self.locked.is_none()
             && self.bot.is_none()
             && self.discoverable.is_none()
+            && self.avatar.is_none()
+            && self.header.is_none()
     }
 }
