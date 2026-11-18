@@ -22,7 +22,7 @@ use core::future::Future;
 
 use crate::model::{
     Account, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
-    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
+    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry, AuditFilter,
     Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome,
     DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft, FilterV1,
     FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language, List, LocalId, MarkerTimeline,
@@ -602,8 +602,11 @@ pub trait AdminActions {
     // Relays are deliberately absent: Mastodon documents no relay endpoint
     // (`/methods/admin/relays/` is itself a 404) and `/api/v1/admin/relays` answers the
     // instance's HTML 404 page. Following a relay is a web-UI action only.
-    /// The most recent administrative actions. Requires `admin:read`.
-    fn audit(&self, limit: u16) -> impl Future<Output = Result<Vec<AuditEntry>, Self::Error>>;
+    /// A page of the audit log, narrowed by the filter. Requires `admin:read`.
+    fn audit(
+        &self,
+        filter: &AuditFilter,
+    ) -> impl Future<Output = Result<Vec<AuditEntry>, Self::Error>>;
 
     /// Who the grant belongs to, what it may do, and how much is waiting. Requires
     /// `admin:read`.

@@ -499,6 +499,27 @@ mod tests {
     }
 }
 
+/// Which administrative actions to put in one page of the audit log.
+///
+/// Every field is optional and every absent one means "do not narrow": the log is a
+/// record of everything staff did, and an untouched screen shows all of it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuditFilter {
+    /// One action name, e.g. `resolve_report`.
+    #[serde(default)]
+    pub action: Option<String>,
+    /// One object type, e.g. `report` or `account`.
+    #[serde(default)]
+    pub target_type: Option<String>,
+    /// The account that performed the action.
+    #[serde(default)]
+    pub actor_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u16>,
+    #[serde(default)]
+    pub offset: Option<u32>,
+}
+
 /// One recorded administrative action.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuditEntry {

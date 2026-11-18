@@ -20,7 +20,8 @@ mod stream;
 pub use admin::{
     AccountDetail, AccountNote, AccountOrigin, AccountStatus, AdminAccount, AdminAccountQuery,
     AdminAlert, AdminCounts, AdminMeasure, AdminMeta, AdminOverview, AnnouncementDraft, AssetKind,
-    AssetUpload, AuditEntry, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome,
+    AssetUpload, AuditEntry, AuditFilter, DomainAllow, DomainBlock, DomainBlockDraft,
+    DomainImportOutcome,
     DomainSeverity, EmailDomainBlock, FlagState, MeasurePoint, ModerationAction, NewScanner,
     NodeLog, NodeStatus, Report, ReportDraft, ReportFilter, ReportState, Scan, ScanFlag,
     ScanRequest, ScanSeverity, Scanner, ScannerAsset, ScannerKind, ScannerRule, ScanningSummary,

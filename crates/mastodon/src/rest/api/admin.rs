@@ -15,7 +15,7 @@
 use crate::actions::AdminActions;
 use crate::model::{
     AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
-    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
+    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry, AuditFilter,
     DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome, DomainSeverity,
     EmailDomainBlock, FlagState, ModerationAction, NewScanner, NodeLog, Report, ReportDraft,
     ReportFilter, ReportState, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset,
@@ -373,9 +373,22 @@ impl<T: Transport> AdminActions for RestInstance<T> {
         self.fetch(self.get(with_query(url, &pairs))).await
     }
 
-    async fn audit(&self, limit: u16) -> Result<Vec<AuditEntry>> {
+    async fn audit(&self, filter: &AuditFilter) -> Result<Vec<AuditEntry>> {
         let url = self.url("/api/v1/admin/audit")?;
-        let pairs = [("limit", limit.to_string())];
+        let mut pairs = Vec::new();
+        push(&mut pairs, "action", filter.action.as_ref());
+        push(&mut pairs, "target_type", filter.target_type.as_ref());
+        push(&mut pairs, "actor_id", filter.actor_id.as_ref());
+        push(
+            &mut pairs,
+            "limit",
+            filter.limit.map(|limit| limit.to_string()).as_ref(),
+        );
+        push(
+            &mut pairs,
+            "offset",
+            filter.offset.map(|offset| offset.to_string()).as_ref(),
+        );
         self.fetch(self.get(with_query(url, &pairs))).await
     }
 
