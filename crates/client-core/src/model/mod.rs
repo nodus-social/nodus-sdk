@@ -7,10 +7,12 @@
 //! in exactly one place.
 
 mod admin;
+mod discovery;
 mod filter;
 mod highlights;
 mod instance;
 mod interaction;
+mod markers;
 mod schedule;
 mod settings;
 mod stream;
@@ -24,7 +26,11 @@ pub use admin::{
     ScanRequest, ScanSeverity, Scanner, ScannerAsset, ScannerKind, ScannerRule, ScanningSummary,
     SeverityCount, Topology, TopologyNode, TriggerOutcome, WarningPreset,
 };
-pub use filter::{Filter, FilterAction, FilterContext, FilterDraft, FilterKeyword, Verdict, judge};
+pub use discovery::{Suggestion, TrendingLink};
+pub use filter::{
+    Filter, FilterAction, FilterContext, FilterDraft, FilterKeyword, FilterV1, FilterV1Draft,
+    Verdict, judge,
+};
 pub use highlights::{FeaturedTag, Rule};
 pub use instance::{
     Configuration, InstanceContact, InstanceInfo, InstanceThumbnail, Registrations, Statuses,
@@ -32,8 +38,9 @@ pub use instance::{
 };
 pub use interaction::{
     Conversation, HistoryEntry, List, Media, MediaAttachment, MediaKind, Mention, Poll, PollOption,
-    ProfileUpdate, SearchResults, Tag, TagHistory,
+    ProfileImage, ProfileUpdate, SearchResults, Tag, TagHistory,
 };
+pub use markers::{Marker, MarkerTimeline, MarkerUpdate, Markers};
 pub use schedule::{ScheduledParams, ScheduledStatus};
 pub use settings::{Announcement, Preferences};
 pub use stream::StreamEvent;

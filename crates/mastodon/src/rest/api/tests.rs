@@ -3,12 +3,13 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 
 use crate::actions::{
-    AccountActions, AdminActions, Browse, FilterActions, HighlightActions, ScheduleActions,
-    SettingsActions, StatusActions,
+    AccountActions, AdminActions, Browse, FilterActions, FilterV1Actions, HighlightActions,
+    InstanceMeta, MarkerActions, ScheduleActions, SettingsActions, StatusActions, TagActions,
 };
 use crate::api::InstanceApi;
 use crate::model::{
-    Draft, FilterAction, FilterContext, FilterDraft, LocalId, PollDraft, ProfileUpdate, Visibility,
+    Draft, FilterAction, FilterContext, FilterDraft, FilterV1Draft, LocalId, MarkerTimeline,
+    MarkerUpdate, PollDraft, ProfileImage, ProfileUpdate, Visibility,
 };
 use crate::rest::{HttpRequest, HttpResponse, RestInstance, Transport};
 use crate::{Error, Instance, Result};
@@ -120,6 +121,8 @@ const MINIMAL_STATUS_JSON: &str = r#"{"id":"1","created_at":"2026-01-01T00:00:00
 const MINIMAL_ACCOUNT_JSON: &str = r#"{"id":"1","acct":"alice","display_name":"Alice"}"#;
 const MINIMAL_FILTER_JSON: &str =
     r#"{"id":"1","title":"Spoilers","context":["home"],"filter_action":"warn","keywords":[]}"#;
+const MINIMAL_FILTER_V1_JSON: &str =
+    r#"{"id":"1","phrase":"spoiler","context":["home"],"irreversible":true}"#;
 const MINIMAL_SCHEDULED_JSON: &str =
     r#"{"id":"1","scheduled_at":"2026-12-01T12:00:00Z","params":{"text":"hello"}}"#;
 
@@ -293,6 +296,8 @@ fn update_profile_sends_bot_and_discoverable_fields() {
         discoverable: Some(false),
         avatar: None,
         header: None,
+        avatar_image: None,
+        header_image: None,
     };
 
     block_on(instance.update_profile(&update)).expect("update_profile");
@@ -434,4 +439,245 @@ fn post_status_sends_draft_fields_and_idempotency_key() {
     assert!(!pairs.iter().any(|(k, _)| k == "spoiler_text"));
     assert!(!pairs.iter().any(|(k, _)| k == "sensitive"));
     assert_eq!(recorded[0].header("Idempotency-Key"), Some("post-idem-1"));
+}
+
+#[test]
+fn markers_read_asks_only_for_the_requested_timelines() {
+    let (instance, requests) = instance_with(vec![ok_json(
+        r#"{"home":{"last_read_id":"42","version":3},"notifications":{"last_read_id":"9"}}"#,
+    )]);
+
+    let markers = block_on(instance.markers(&[MarkerTimeline::Notifications])).expect("markers");
+    assert_eq!(
+        markers
+            .get(MarkerTimeline::Notifications)
+            .map(|marker| marker.last_read_id.as_str()),
+        Some("9")
+    );
+
+    let recorded = requests.borrow();
+    assert_eq!(recorded[0].method, "GET");
+    assert_eq!(
+        recorded[0].url,
+        "https://mastodon.example/api/v1/markers?timeline%5B%5D=notifications"
+    );
+}
+
+#[test]
+fn markers_write_names_each_timeline_in_the_form() {
+    let (instance, requests) = instance_with(vec![ok_json(
+        r#"{"home":{"last_read_id":"42","version":4}}"#,
+    )]);
+
+    let updates = [
+        MarkerUpdate::new(MarkerTimeline::Home, "42").version(4),
+        MarkerUpdate::new(MarkerTimeline::Notifications, "9"),
+    ];
+    block_on(instance.save_markers(&updates)).expect("save_markers");
+
+    let recorded = requests.borrow();
+    assert_eq!(recorded[0].method, "POST");
+    assert_eq!(recorded[0].url, "https://mastodon.example/api/v1/markers");
+    assert_eq!(
+        recorded[0].form_pairs(),
+        vec![
+            ("home[last_read_id]".to_owned(), "42".to_owned()),
+            ("home[version]".to_owned(), "4".to_owned()),
+            ("notifications[last_read_id]".to_owned(), "9".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn tag_endpoints_address_the_tag_by_name_and_encode_it() {
+    let (instance, requests) = instance_with(vec![
+        ok_json("[]"),
+        ok_json(r#"{"name":"rust","following":false}"#),
+        ok_json(r#"{"name":"rust","following":true}"#),
+        ok_json(r#"{"name":"rust","following":false}"#),
+    ]);
+
+    block_on(instance.own_featured_tags()).expect("own_featured_tags");
+    block_on(instance.tag("#rust")).expect("tag");
+    block_on(instance.follow_tag("#rust")).expect("follow_tag");
+    block_on(instance.unfollow_tag("#rust")).expect("unfollow_tag");
+
+    let recorded = requests.borrow();
+    assert_eq!(recorded[0].method, "GET");
+    assert_eq!(
+        recorded[0].url,
+        "https://mastodon.example/api/v1/featured_tags"
+    );
+    assert_eq!(
+        recorded[1].url,
+        "https://mastodon.example/api/v1/tags/%23rust"
+    );
+    assert_eq!(
+        recorded[2].url,
+        "https://mastodon.example/api/v1/tags/%23rust/follow"
+    );
+    assert_eq!(recorded[2].method, "POST");
+    assert_eq!(
+        recorded[3].url,
+        "https://mastodon.example/api/v1/tags/%23rust/unfollow"
+    );
+}
+
+#[test]
+fn filter_v1_writes_every_context_as_a_repeated_field() {
+    let (instance, requests) = instance_with(vec![
+        ok_json("[]"),
+        ok_json(MINIMAL_FILTER_V1_JSON),
+        ok_json(MINIMAL_FILTER_V1_JSON),
+        ok_empty(200),
+    ]);
+    let draft = FilterV1Draft::new("spoiler")
+        .contexts(vec![FilterContext::Home, FilterContext::Public])
+        .action(FilterAction::Hide)
+        .whole_word(true);
+
+    block_on(instance.filters_v1()).expect("filters_v1");
+    block_on(instance.create_filter_v1(&draft)).expect("create_filter_v1");
+    block_on(instance.update_filter_v1("7", &draft)).expect("update_filter_v1");
+    block_on(instance.delete_filter_v1("7")).expect("delete_filter_v1");
+
+    let recorded = requests.borrow();
+    assert_eq!(recorded[0].url, "https://mastodon.example/api/v1/filters");
+    assert_eq!(recorded[1].method, "POST");
+    assert_eq!(recorded[1].url, "https://mastodon.example/api/v1/filters");
+    assert_eq!(recorded[1].form_pairs(), expected_v1_form());
+    assert_eq!(recorded[2].method, "PUT");
+    assert_eq!(recorded[2].url, "https://mastodon.example/api/v1/filters/7");
+    assert_eq!(recorded[2].form_pairs(), expected_v1_form());
+    assert_eq!(recorded[3].method, "DELETE");
+    assert_eq!(recorded[3].url, "https://mastodon.example/api/v1/filters/7");
+}
+
+fn expected_v1_form() -> Vec<(String, String)> {
+    vec![
+        ("phrase".to_owned(), "spoiler".to_owned()),
+        ("context[]".to_owned(), "home".to_owned()),
+        ("context[]".to_owned(), "public".to_owned()),
+        ("irreversible".to_owned(), "true".to_owned()),
+        ("whole_word".to_owned(), "true".to_owned()),
+    ]
+}
+
+#[test]
+fn update_profile_uploads_images_as_multipart_parts() {
+    let (instance, requests) = instance_with(vec![ok_json(MINIMAL_ACCOUNT_JSON)]);
+    let update = ProfileUpdate {
+        display_name: Some("Alice".to_owned()),
+        note: None,
+        locked: None,
+        bot: None,
+        discoverable: None,
+        avatar: None,
+        header: None,
+        avatar_image: Some(ProfileImage::new(b"avatar-bytes", "image/png")),
+        header_image: None,
+    };
+
+    block_on(instance.update_profile(&update)).expect("update_profile");
+
+    let recorded = requests.borrow();
+    let request = &recorded[0];
+    assert_eq!(request.method, "PATCH");
+    let content_type = request.header("content-type").expect("content type");
+    assert!(content_type.starts_with("multipart/form-data; boundary="));
+    let body = String::from_utf8_lossy(request.body.as_deref().unwrap_or_default());
+    assert!(body.contains("name=\"display_name\""));
+    assert!(body.contains("name=\"avatar\"; filename=\"avatar\""));
+    assert!(body.contains("Content-Type: image/png"));
+    assert!(body.contains("avatar-bytes"));
+}
+
+#[test]
+fn discovery_endpoints_carry_their_limit() {
+    let (instance, requests) = instance_with(vec![
+        ok_json(&format!(
+            r#"[{{"account":{MINIMAL_ACCOUNT_JSON},"source":"staff"}}]"#
+        )),
+        ok_json(r#"[{"url":"https://example.com/a","title":"A","type":"link"}]"#),
+    ]);
+
+    let suggestions = block_on(instance.suggestions(5)).expect("suggestions");
+    assert_eq!(suggestions.len(), 1);
+    let links = block_on(instance.trending_links(3)).expect("trending_links");
+    assert_eq!(links.len(), 1);
+
+    let recorded = requests.borrow();
+    assert_eq!(
+        recorded[0].url,
+        "https://mastodon.example/api/v2/suggestions?limit=5"
+    );
+    assert_eq!(
+        recorded[1].url,
+        "https://mastodon.example/api/v1/trends/links?limit=3"
+    );
+}
+
+#[test]
+fn parity_endpoints_map_a_rejected_write_to_the_server_message() {
+    let rejected = || HttpResponse {
+        status: 422,
+        retry_after_s: None,
+        body: br#"{"error":"invalid"}"#.to_vec(),
+    };
+    let (instance, _) = instance_with(vec![
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+        rejected(),
+    ]);
+    let draft = FilterV1Draft::new("spoiler");
+    let updates = [MarkerUpdate::new(MarkerTimeline::Home, "42")];
+    let profile = ProfileUpdate {
+        display_name: Some("Alice".to_owned()),
+        ..ProfileUpdate::default()
+    };
+
+    let rejected = |result: Result<()>| {
+        matches!(
+            result,
+            Err(Error::Status {
+                status: 422,
+                ref message
+            }) if message == "invalid"
+        )
+    };
+    assert!(rejected(
+        block_on(instance.markers(&[MarkerTimeline::Home])).map(|_| ())
+    ));
+    assert!(rejected(
+        block_on(instance.save_markers(&updates)).map(|_| ())
+    ));
+    assert!(rejected(block_on(instance.own_featured_tags()).map(|_| ())));
+    assert!(rejected(block_on(instance.tag("rust")).map(|_| ())));
+    assert!(rejected(block_on(instance.follow_tag("rust")).map(|_| ())));
+    assert!(rejected(
+        block_on(instance.unfollow_tag("rust")).map(|_| ())
+    ));
+    assert!(rejected(block_on(instance.filters_v1()).map(|_| ())));
+    assert!(rejected(
+        block_on(instance.create_filter_v1(&draft)).map(|_| ())
+    ));
+    assert!(rejected(
+        block_on(instance.update_filter_v1("7", &draft)).map(|_| ())
+    ));
+    assert!(rejected(block_on(instance.delete_filter_v1("7"))));
+    assert!(rejected(
+        block_on(instance.update_profile(&profile)).map(|_| ())
+    ));
+    assert!(rejected(block_on(instance.suggestions(5)).map(|_| ())));
+    assert!(rejected(block_on(instance.trending_links(3)).map(|_| ())));
 }

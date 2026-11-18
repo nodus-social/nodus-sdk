@@ -29,6 +29,9 @@ pub struct Mention {
 /// A hashtag in the content of a status.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Tag {
+    /// The tag's own id, when the payload carries one.
+    #[serde(default)]
+    pub id: Option<String>,
     /// The tag itself, without `#`.
     pub name: String,
     /// Permalink to the tag timeline.
@@ -37,6 +40,15 @@ pub struct Tag {
     /// Daily usage counts, when the instance reports them.
     #[serde(default)]
     pub history: Vec<TagHistory>,
+    /// Whether the signed-in account follows this tag.
+    #[serde(default)]
+    pub following: bool,
+    /// Posts that used the tag over the instance's retention window.
+    #[serde(default)]
+    pub statuses_count: Option<u64>,
+    /// Accounts following the tag.
+    #[serde(default)]
+    pub following_count: Option<u64>,
 }
 
 /// One day of usage for a hashtag.
@@ -304,6 +316,42 @@ pub struct ProfileUpdate {
     pub avatar: Option<String>,
     /// The banner, as the id of an image already uploaded to the instance.
     pub header: Option<String>,
+    /// The profile picture, to upload with this change.
+    pub avatar_image: Option<ProfileImage>,
+    /// The banner, to upload with this change.
+    pub header_image: Option<ProfileImage>,
+}
+
+/// An image sent with a profile change.
+///
+/// The bytes travel with the request rather than through the media endpoint first:
+/// the profile endpoints take `multipart/form-data`, and an image uploaded there is
+/// cropped and stored as an avatar, not as a post attachment.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ProfileImage {
+    pub bytes: Vec<u8>,
+    pub mime: String,
+}
+
+impl ProfileImage {
+    /// An image of `bytes` with the MIME type its filename extension already implies.
+    #[must_use]
+    pub fn new(bytes: impl Into<Vec<u8>>, mime: impl Into<String>) -> Self {
+        Self {
+            bytes: bytes.into(),
+            mime: mime.into(),
+        }
+    }
+}
+
+impl core::fmt::Debug for ProfileImage {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("ProfileImage")
+            .field("mime", &self.mime)
+            .field("bytes", &format_args!("{} bytes", self.bytes.len()))
+            .finish()
+    }
 }
 
 impl ProfileUpdate {
@@ -348,6 +396,20 @@ impl ProfileUpdate {
         self
     }
 
+    /// Uploads a new profile picture with this change.
+    #[must_use]
+    pub fn avatar_image(mut self, image: ProfileImage) -> Self {
+        self.avatar_image = Some(image);
+        self
+    }
+
+    /// Uploads a new banner with this change.
+    #[must_use]
+    pub fn header_image(mut self, image: ProfileImage) -> Self {
+        self.header_image = Some(image);
+        self
+    }
+
     /// Whether the result says anything at all.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -358,5 +420,7 @@ impl ProfileUpdate {
             && self.discoverable.is_none()
             && self.avatar.is_none()
             && self.header.is_none()
+            && self.avatar_image.is_none()
+            && self.header_image.is_none()
     }
 }

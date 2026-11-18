@@ -796,6 +796,14 @@ impl nodus_client_core::actions::Browse for RichInstance {
         fail::<Vec<Account>>()
     }
 
+    fn suggestions(
+        &self,
+        _limit: u16,
+    ) -> impl core::future::Future<Output = Result<Vec<nodus_client_core::model::Suggestion>, Self::Error>>
+    {
+        fail::<Vec<nodus_client_core::model::Suggestion>>()
+    }
+
     fn mute_conversation(
         &self,
         _id: &str,

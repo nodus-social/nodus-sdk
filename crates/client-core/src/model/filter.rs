@@ -202,6 +202,108 @@ impl FilterDraft {
     }
 }
 
+/// A filter as instances before 4.0 keep it: one phrase, not a list of keywords.
+///
+/// The v1 shape is still served by every instance, and an older one serves nothing else,
+/// so a client that can only read v2 shows an empty filter list against it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FilterV1 {
+    pub id: String,
+    #[serde(default)]
+    pub phrase: String,
+    #[serde(default)]
+    pub context: Vec<FilterContext>,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+    /// v1's name for "hide instead of warn".
+    #[serde(default)]
+    pub irreversible: bool,
+    #[serde(default)]
+    pub whole_word: bool,
+}
+
+impl FilterV1 {
+    /// Whether this filter was meant for `context`.
+    #[must_use]
+    pub fn applies_to(&self, context: FilterContext) -> bool {
+        self.context.contains(&context)
+    }
+
+    /// The v2 spelling of this filter's action.
+    ///
+    /// v1 has only `irreversible`, so a filter written there reads as `Hide` when it is
+    /// set and `Warn` otherwise; that is the whole of the field's meaning.
+    #[must_use]
+    pub const fn action(&self) -> FilterAction {
+        if self.irreversible {
+            FilterAction::Hide
+        } else {
+            FilterAction::Warn
+        }
+    }
+
+    /// Whether this filter's phrase occurs in `text`.
+    #[must_use]
+    pub fn matches(&self, text: &str) -> bool {
+        let haystack = text.to_lowercase();
+        let needle = self.phrase.trim().to_lowercase();
+        if needle.is_empty() {
+            return false;
+        }
+        if self.whole_word {
+            contains_word(&haystack, &needle)
+        } else {
+            haystack.contains(&needle)
+        }
+    }
+}
+
+/// A v1 filter being created or edited.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilterV1Draft {
+    pub phrase: String,
+    pub context: Vec<FilterContext>,
+    /// Seconds until expiry, as the API wants it.
+    pub expires_in: Option<String>,
+    pub irreversible: bool,
+    pub whole_word: bool,
+}
+
+impl FilterV1Draft {
+    /// A filter matching everywhere, warning rather than hiding.
+    #[must_use]
+    pub fn new(phrase: impl Into<String>) -> Self {
+        Self {
+            phrase: phrase.into(),
+            context: FilterContext::ALL.to_vec(),
+            expires_in: None,
+            irreversible: false,
+            whole_word: false,
+        }
+    }
+
+    /// Restrict the filter to these contexts.
+    #[must_use]
+    pub fn contexts(mut self, context: Vec<FilterContext>) -> Self {
+        self.context = context;
+        self
+    }
+
+    /// Choose between warning and hiding.
+    #[must_use]
+    pub const fn action(mut self, action: FilterAction) -> Self {
+        self.irreversible = matches!(action, FilterAction::Hide);
+        self
+    }
+
+    /// Require whole words only.
+    #[must_use]
+    pub const fn whole_word(mut self, whole_word: bool) -> Self {
+        self.whole_word = whole_word;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +365,29 @@ mod tests {
     #[test]
     fn the_default_action_is_a_warning() {
         assert_eq!(FilterAction::default(), FilterAction::Warn);
+    }
+
+    #[test]
+    fn a_v1_filter_reads_irreversible_as_hide() {
+        let filter: FilterV1 =
+            serde_json::from_str(r#"{"id":"1","phrase":"spoiler","irreversible":true}"#)
+                .expect("v1 filter");
+        assert_eq!(filter.action(), FilterAction::Hide);
+        assert!(filter.matches("a spoiler"));
+    }
+
+    #[test]
+    fn a_v1_draft_writes_the_action_as_irreversible() {
+        assert!(
+            FilterV1Draft::new("x")
+                .action(FilterAction::Hide)
+                .irreversible
+        );
+        assert!(
+            !FilterV1Draft::new("x")
+                .action(FilterAction::Warn)
+                .irreversible
+        );
     }
 }
 

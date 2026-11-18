@@ -469,9 +469,13 @@ fn tags(text: &str) -> Vec<Tag> {
     text.split_whitespace()
         .filter(|word| word.starts_with('#') && word.len() > 1)
         .map(|word| Tag {
+            id: None,
             name: word.trim_start_matches('#').to_owned(),
             url: String::new(),
             history: Vec::new(),
+            following: false,
+            statuses_count: None,
+            following_count: None,
         })
         .collect()
 }

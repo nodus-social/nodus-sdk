@@ -179,6 +179,22 @@ impl<T: Transport> AccountActions for RestInstance<T> {
             form.push(("header", header.clone()));
         }
         let url = self.url("/api/v1/accounts/update_credentials")?;
+        let upload = update.avatar_image.is_some() || update.header_image.is_some();
+        if upload {
+            let mut parts: Vec<Part<'_>> = form
+                .iter()
+                .map(|(name, value)| Part::field(name, value))
+                .collect();
+            if let Some(image) = &update.avatar_image {
+                parts.push(Part::file("avatar", "avatar", &image.mime, &image.bytes));
+            }
+            if let Some(image) = &update.header_image {
+                parts.push(Part::file("header", "header", &image.mime, &image.bytes));
+            }
+            let (boundary, body) = multipart_body(&parts)?;
+            let content_type = format!("multipart/form-data; boundary={boundary}");
+            return self.fetch(self.patch_body(url, &content_type, body)).await;
+        }
         self.fetch(self.patch_form(url, &form)).await
     }
 
@@ -203,8 +219,8 @@ impl<T: Transport> AccountActions for RestInstance<T> {
     }
 }
 
-/// Prefix for generated multipart boundaries; a unique suffix is appended and
-/// checked against the payload and description in `multipart_body`.
+/// Prefix for generated multipart boundaries; a unique suffix is appended and checked
+/// against every part in `multipart_body`.
 const UPLOAD_BOUNDARY_PREFIX: &str = "nodus-upload-boundary";
 static UPLOAD_BOUNDARY_SEQ: AtomicU64 = AtomicU64::new(1);
 
@@ -221,7 +237,11 @@ impl<T: Transport> RestInstance<T> {
         description: Option<&str>,
     ) -> Result<crate::rest::HttpRequest> {
         let url = self.url("/api/v2/media")?;
-        let (boundary, body) = multipart_body(bytes, mime, description)?;
+        let mut parts = vec![Part::file("file", "upload", mime, bytes)];
+        if let Some(text) = description {
+            parts.push(Part::field("description", text));
+        }
+        let (boundary, body) = multipart_body(&parts)?;
         Ok(self.post_body(
             url,
             &format!("multipart/form-data; boundary={boundary}"),
@@ -230,11 +250,56 @@ impl<T: Transport> RestInstance<T> {
     }
 }
 
-impl<T: Transport> RestInstance<T> {
-    /// The six account verbs that all answer with a relationship.
-    async fn account_verb(&self, id: &str, verb: &str) -> Result<Relationship> {
-        let url = self.url_segments(&["api", "v1", "accounts", id, verb])?;
-        self.fetch(self.post(url)).await
+/// One part of a `multipart/form-data` body: a text field or an uploaded file.
+enum Part<'a> {
+    Field {
+        name: &'a str,
+        value: &'a str,
+    },
+    File {
+        name: &'a str,
+        filename: &'a str,
+        mime: &'a str,
+        bytes: &'a [u8],
+    },
+}
+
+impl<'a> Part<'a> {
+    fn field(name: &'a str, value: &'a str) -> Self {
+        Self::Field { name, value }
+    }
+
+    fn file(name: &'a str, filename: &'a str, mime: &'a str, bytes: &'a [u8]) -> Self {
+        Self::File {
+            name,
+            filename,
+            mime,
+            bytes,
+        }
+    }
+
+    /// Whether `needle` occurs anywhere this part contributes to the body.
+    ///
+    /// A boundary that appears inside the payload would split the part in two, so every
+    /// byte of every part has to be checked, not just the file contents.
+    fn contains(&self, needle: &[u8]) -> bool {
+        match self {
+            Self::Field { name, value } => {
+                contains_subslice(name.as_bytes(), needle)
+                    || contains_subslice(value.as_bytes(), needle)
+            }
+            Self::File {
+                name,
+                filename,
+                mime,
+                bytes,
+            } => {
+                contains_subslice(bytes, needle)
+                    || contains_subslice(mime.as_bytes(), needle)
+                    || contains_subslice(filename.as_bytes(), needle)
+                    || contains_subslice(name.as_bytes(), needle)
+            }
+        }
     }
 }
 
@@ -245,50 +310,62 @@ fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
-fn choose_boundary(bytes: &[u8], mime: &str, description: Option<&str>) -> String {
-    let desc_bytes = description.unwrap_or_default().as_bytes();
+fn choose_boundary(parts: &[Part<'_>]) -> String {
     loop {
         let seq = UPLOAD_BOUNDARY_SEQ.fetch_add(1, Ordering::Relaxed);
         let candidate = format!("{UPLOAD_BOUNDARY_PREFIX}-{seq}");
-        let needle = candidate.as_bytes();
-        if !contains_subslice(bytes, needle)
-            && !contains_subslice(mime.as_bytes(), needle)
-            && !contains_subslice(desc_bytes, needle)
-        {
+        if !parts.iter().any(|part| part.contains(candidate.as_bytes())) {
             return candidate;
         }
     }
 }
 
-/// One multipart part: the file, plus an optional description Mastodon stores for alt text.
-fn multipart_body(
-    bytes: &[u8],
-    mime: &str,
-    description: Option<&str>,
-) -> Result<(String, Vec<u8>)> {
-    if mime.trim().is_empty() || mime.bytes().any(|b| b.is_ascii_control()) {
-        return Err(Error::Transport("invalid media MIME type".to_owned()));
+/// Serialises `parts`, choosing a boundary none of them contains.
+fn multipart_body(parts: &[Part<'_>]) -> Result<(String, Vec<u8>)> {
+    for part in parts {
+        if let Part::File { mime, .. } = part
+            && (mime.trim().is_empty() || mime.bytes().any(|b| b.is_ascii_control()))
+        {
+            return Err(Error::Transport("invalid media MIME type".to_owned()));
+        }
     }
-    let boundary = choose_boundary(bytes, mime, description);
-    let mut body = Vec::with_capacity(bytes.len() + 512);
-    body.extend_from_slice(
-        format!(
-            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"upload\"\r\nContent-Type: {mime}\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(bytes);
-    body.extend_from_slice(b"\r\n");
-    if let Some(text) = description {
-        body.extend_from_slice(
-            format!(
-                "--{boundary}\r\nContent-Disposition: form-data; name=\"description\"\r\n\r\n{text}\r\n"
-            )
-            .as_bytes(),
-        );
+    let boundary = choose_boundary(parts);
+    let mut body = Vec::with_capacity(512);
+    for part in parts {
+        match part {
+            Part::Field { name, value } => body.extend_from_slice(
+                format!(
+                    "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+                )
+                .as_bytes(),
+            ),
+            Part::File {
+                name,
+                filename,
+                mime,
+                bytes,
+            } => {
+                body.extend_from_slice(
+                    format!(
+                        "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: {mime}\r\n\r\n"
+                    )
+                    .as_bytes(),
+                );
+                body.extend_from_slice(bytes);
+                body.extend_from_slice(b"\r\n");
+            }
+        }
     }
     body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
     Ok((boundary, body))
+}
+
+impl<T: Transport> RestInstance<T> {
+    /// The six account verbs that all answer with a relationship.
+    async fn account_verb(&self, id: &str, verb: &str) -> Result<Relationship> {
+        let url = self.url_segments(&["api", "v1", "accounts", id, verb])?;
+        self.fetch(self.post(url)).await
+    }
 }
 
 impl<T: Transport> MediaActions for RestInstance<T> {
@@ -356,6 +433,13 @@ impl<T: Transport> Browse for RestInstance<T> {
             .append_pair("local", if local_only { "true" } else { "false" })
             .append_pair("order", "active")
             .append_pair("offset", &offset.to_string())
+            .append_pair("limit", &limit.to_string());
+        self.fetch(self.get(url)).await
+    }
+
+    async fn suggestions(&self, limit: u16) -> Result<Vec<crate::model::Suggestion>> {
+        let mut url = self.url("/api/v2/suggestions")?;
+        url.query_pairs_mut()
             .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await
     }

@@ -1,7 +1,7 @@
 //! What the server says about itself, over the REST transport.
 
 use crate::actions::InstanceMeta;
-use crate::model::{CustomEmoji, InstanceInfo, Language, Status, Tag};
+use crate::model::{CustomEmoji, InstanceInfo, Language, Status, Tag, TrendingLink};
 use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
 
@@ -27,6 +27,13 @@ impl<T: Transport> InstanceMeta for RestInstance<T> {
 
     async fn trending_statuses(&self, limit: usize) -> Result<Vec<Status>> {
         let mut url = self.url("/api/v1/trends/statuses")?;
+        url.query_pairs_mut()
+            .append_pair("limit", &limit.to_string());
+        self.fetch(self.get(url)).await
+    }
+
+    async fn trending_links(&self, limit: usize) -> Result<Vec<TrendingLink>> {
+        let mut url = self.url("/api/v1/trends/links")?;
         url.query_pairs_mut()
             .append_pair("limit", &limit.to_string());
         self.fetch(self.get(url)).await

@@ -3,11 +3,14 @@
 mod actions;
 mod admin;
 mod filters;
+mod filters_v1;
 mod highlights;
+mod markers;
 mod meta;
 mod registration;
 mod schedule;
 mod settings;
+mod tags;
 #[cfg(test)]
 mod tests;
 

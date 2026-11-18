@@ -24,11 +24,12 @@ use crate::model::{
     Account, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
     AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
     Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome,
-    DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft, FlagState,
-    HistoryEntry, InstanceInfo, Language, List, LocalId, MediaAttachment, ModerationAction,
-    NewScanner, NodeLog, Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft,
-    ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner,
-    ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Tag, Topology,
+    DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft, FilterV1,
+    FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language, List, LocalId, MarkerTimeline,
+    MarkerUpdate, Markers, MediaAttachment, ModerationAction, NewScanner, NodeLog, Page,
+    PageParams, Poll, Preferences, Relationship, Report, ReportDraft, ReportFilter, ReportState,
+    Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset, ScannerRule,
+    ScheduledStatus, SearchResults, Status, Suggestion, Tag, Topology, TrendingLink,
     TriggerOutcome, WarningPreset,
 };
 
@@ -198,6 +199,31 @@ pub trait AccountActions {
     ) -> impl Future<Output = Result<Account, Self::Error>>;
 }
 
+/// Reading positions, one per timeline.
+///
+/// The server keeps this so a second device opens where the first one stopped; a client
+/// that only stores positions locally loses them on every reinstall and re-notifies for
+/// posts already read elsewhere.
+pub trait MarkerActions {
+    /// Error type of the transport.
+    type Error: Debug;
+
+    /// The markers for `timelines`, as the instance holds them.
+    fn markers(
+        &self,
+        timelines: &[MarkerTimeline],
+    ) -> impl Future<Output = Result<Markers, Self::Error>>;
+
+    /// Writes reading positions, answering with the merged set.
+    ///
+    /// A write whose `version` is older than the stored one is ignored by the instance,
+    /// so the answer is what the caller should render, not what it sent.
+    fn save_markers(
+        &self,
+        updates: &[MarkerUpdate],
+    ) -> impl Future<Output = Result<Markers, Self::Error>>;
+}
+
 /// The collections a client lists: favourites, bookmarks, conversations, lists.
 pub trait Browse {
     /// Error type of the transport.
@@ -237,6 +263,13 @@ pub trait Browse {
         local_only: bool,
         offset: u32,
     ) -> impl Future<Output = Result<Vec<Account>, Self::Error>>;
+
+    /// Accounts the instance's suggestion algorithm ranks highest.
+    ///
+    /// The v2 surface rather than the retired v1 one: it names the reason an account was
+    /// suggested, which is what lets a reader decide whether to trust the list.
+    fn suggestions(&self, limit: u16)
+    -> impl Future<Output = Result<Vec<Suggestion>, Self::Error>>;
 
     /// Mutes or unmutes a conversation.
     fn mute_conversation(
@@ -336,6 +369,35 @@ pub trait FilterActions {
 
     /// Delete a filter and its phrases.
     fn delete_filter(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+}
+
+/// The filters older instances keep, under `/api/v1/filters`.
+///
+/// Mastodon 4.0 replaced this surface with v2's keyword lists, but instances before 4.0
+/// serve only this one, and later ones still accept it. A filter here has a single
+/// `phrase` and an `irreversible` flag instead of keywords and an action.
+pub trait FilterV1Actions {
+    /// Error type of the transport.
+    type Error: Debug;
+
+    /// Every v1 filter this account keeps.
+    fn filters_v1(&self) -> impl Future<Output = Result<Vec<FilterV1>, Self::Error>>;
+
+    /// Create a v1 filter.
+    fn create_filter_v1(
+        &self,
+        draft: &FilterV1Draft,
+    ) -> impl Future<Output = Result<FilterV1, Self::Error>>;
+
+    /// Replace a v1 filter's phrase and settings.
+    fn update_filter_v1(
+        &self,
+        id: &str,
+        draft: &FilterV1Draft,
+    ) -> impl Future<Output = Result<FilterV1, Self::Error>>;
+
+    /// Delete a v1 filter.
+    fn delete_filter_v1(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 /// Moderation: the report queue, account standing, blocked domains.
@@ -785,6 +847,14 @@ pub trait InstanceMeta {
         &self,
         limit: usize,
     ) -> impl Future<Output = Result<Vec<Status>, Self::Error>>;
+
+    /// Links this instance is promoting, busiest first.
+    ///
+    /// Same ranking as the trending tags and statuses, for the front page's third rail.
+    fn trending_links(
+        &self,
+        limit: usize,
+    ) -> impl Future<Output = Result<Vec<TrendingLink>, Self::Error>>;
 }
 
 /// Featured tags, and the instance's rules.
@@ -809,6 +879,30 @@ pub trait HighlightActions {
 
     /// The instance's code of conduct.
     fn rules(&self) -> impl Future<Output = Result<Vec<Rule>, Self::Error>>;
+}
+
+/// Tags: the account's featured set, one tag's metadata, following a tag.
+///
+/// Following a tag is not the same as starring a post: it puts every post with that tag
+/// on the home timeline, which is how a reader subscribes to a topic rather than a person.
+pub trait TagActions {
+    /// Error type of the transport.
+    type Error: Debug;
+
+    /// The featured tags of the signed-in account.
+    ///
+    /// `HighlightActions::featured_tags` reads anyone's, which is what a profile page
+    /// needs; this one reads the account's own list, which is what a settings screen edits.
+    fn own_featured_tags(&self) -> impl Future<Output = Result<Vec<FeaturedTag>, Self::Error>>;
+
+    /// One tag's metadata: how many people follow it, how busy it is.
+    fn tag(&self, name: &str) -> impl Future<Output = Result<Tag, Self::Error>>;
+
+    /// Follows a tag, so its posts enter the home timeline.
+    fn follow_tag(&self, name: &str) -> impl Future<Output = Result<Tag, Self::Error>>;
+
+    /// Unfollows a tag.
+    fn unfollow_tag(&self, name: &str) -> impl Future<Output = Result<Tag, Self::Error>>;
 }
 
 /// Posts the instance will publish later.

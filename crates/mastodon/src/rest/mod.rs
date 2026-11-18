@@ -240,6 +240,10 @@ impl<T: Transport> RestInstance<T> {
     }
 
     /// A form-encoded POST.
+    pub fn post_form(&self, url: Url, form: &[(&str, String)]) -> HttpRequest {
+        self.request(Method::Post, url, Some(form_body(form)))
+    }
+
     /// A POST with a caller-built body (multipart uploads).
     /// A POST with a raw body and the bearer token attached.
     ///
@@ -248,6 +252,14 @@ impl<T: Transport> RestInstance<T> {
     /// it comes back as "token rejected (revoked or insufficient scope)".
     pub fn post_body(&self, url: Url, content_type: &str, body: Vec<u8>) -> HttpRequest {
         self.request(Method::Post, url, Some((content_type.to_owned(), body)))
+    }
+
+    /// A PATCH with a caller-built body and the bearer token attached.
+    ///
+    /// The profile endpoints take images inline, and those travel as
+    /// `multipart/form-data`; a raw-body helper for `PATCH` is the only way to send them.
+    pub fn patch_body(&self, url: Url, content_type: &str, body: Vec<u8>) -> HttpRequest {
+        self.request(Method::Patch, url, Some((content_type.to_owned(), body)))
     }
 
     /// A PUT with a JSON body and the bearer token attached.
@@ -260,10 +272,6 @@ impl<T: Transport> RestInstance<T> {
             url,
             Some(("application/json".to_owned(), body)),
         )
-    }
-
-    pub fn post_form(&self, url: Url, form: &[(&str, String)]) -> HttpRequest {
-        self.request(Method::Post, url, Some(form_body(form)))
     }
 
     /// A DELETE with the bearer token attached.
