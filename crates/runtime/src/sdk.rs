@@ -798,12 +798,16 @@ where
     ///
     /// Called once per session, before the first screen that could use an extension.
     /// A server that answers nothing usable records the Mastodon surface, so every
-    /// call site has an answer instead of an `Option` it must branch on.
-    pub async fn load_capabilities(&self) -> Result<Capabilities, SdkError<I::Error, D::Error>> {
-        let meta = self.discovery.meta().await.map_err(SdkError::Discovery)?;
-        let capabilities = Capabilities::from_parts(meta.contract, &meta.features);
+    /// call site has an answer instead of an `Option` it must branch on — and that
+    /// includes a server that answers with an error, because a plain Mastodon instance
+    /// has no `/api/v1/meta` and is still a server this client can read.
+    pub async fn load_capabilities(&self) -> Capabilities {
+        let capabilities = match self.discovery.meta().await {
+            Ok(meta) => Capabilities::from_parts(meta.contract, &meta.features),
+            Err(_) => Capabilities::mastodon(),
+        };
         self.dispatch(Command::CapabilitiesLoaded(capabilities.clone()));
-        Ok(capabilities)
+        capabilities
     }
 
     /// Warm-starts the home timeline from the cache.
