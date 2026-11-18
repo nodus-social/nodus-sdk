@@ -71,6 +71,16 @@ impl Capabilities {
         Self::default()
     }
 
+    /// Whether the server runs Nodus's own extensions.
+    ///
+    /// An empty contract is the Mastodon surface: either the server answered nothing, or
+    /// it answered with a protocol version this client does not recognise. Callers use
+    /// this to skip a request that can only 404 there.
+    #[must_use]
+    pub fn knows_extensions(&self) -> bool {
+        !self.contract.is_empty()
+    }
+
     /// Whether the server advertises `feature`.
     #[must_use]
     pub fn supports(&self, feature: Feature) -> bool {
