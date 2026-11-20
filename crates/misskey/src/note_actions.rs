@@ -130,7 +130,12 @@ impl<T: Transport> MisskeyInstance<T> {
     }
 
     /// Read a note's reaction tally without converting it into a status.
-    async fn reactions(&self, note_id: &str) -> Result<Reactions> {
+    ///
+    /// Public because a caller that holds only a note id — a view drawing the chips on a
+    /// note it was addressed by, not one it read out of a timeline — has no raw payload to
+    /// derive [`Reactions`] from, and a [`Status`](nodus_client_core::model::Status) has no
+    /// field that could carry the tally this far.
+    pub async fn reactions(&self, note_id: &str) -> Result<Reactions> {
         let note = self
             .call("/api/notes/show", json!({ "noteId": note_id }))
             .await?;
