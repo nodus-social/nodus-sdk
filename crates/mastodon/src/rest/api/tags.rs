@@ -27,4 +27,9 @@ impl<T: Transport> TagActions for RestInstance<T> {
         let url = self.url_segments(&["api", "v1", "tags", name, "unfollow"])?;
         self.fetch(self.post(url)).await
     }
+
+    async fn featured_tag_suggestions(&self) -> Result<Vec<FeaturedTag>> {
+        let url = self.url("/api/v1/featured_tags/suggestions")?;
+        self.fetch(self.get(url)).await
+    }
 }

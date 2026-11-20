@@ -22,14 +22,14 @@ use core::future::Future;
 
 use crate::model::{
     Account, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
-    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry, AuditFilter,
-    Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome,
-    DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft, FilterV1,
-    FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language, List, LocalId, MarkerTimeline,
-    MarkerUpdate, Markers, MediaAttachment, ModerationAction, NewScanner, NodeLog, Page,
-    PageParams, Poll, Preferences, Relationship, Report, ReportDraft, ReportFilter, ReportState,
-    Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset, ScannerRule,
-    ScheduledStatus, SearchResults, Status, Suggestion, Tag, Topology, TrendingLink,
+    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
+    AuditFilter, Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft,
+    DomainImportOutcome, DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft,
+    FilterV1, FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language, List, LocalId,
+    MarkerTimeline, MarkerUpdate, Markers, MediaAttachment, ModerationAction, NewScanner, NodeLog,
+    Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft, ReportFilter,
+    ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset,
+    ScannerRule, ScheduledStatus, SearchResults, Status, Suggestion, Tag, Topology, TrendingLink,
     TriggerOutcome, WarningPreset,
 };
 
@@ -906,6 +906,15 @@ pub trait TagActions {
 
     /// Unfollows a tag.
     fn unfollow_tag(&self, name: &str) -> impl Future<Output = Result<Tag, Self::Error>>;
+
+    /// Tags the instance suggests featuring, busiest first.
+    ///
+    /// Answered as `FeaturedTag` documents because that is what Mastodon sends and every
+    /// client parses; a profile editor offers them as one-click additions so the reader
+    /// does not have to remember a name.
+    fn featured_tag_suggestions(
+        &self,
+    ) -> impl Future<Output = Result<Vec<FeaturedTag>, Self::Error>>;
 }
 
 /// Posts the instance will publish later.

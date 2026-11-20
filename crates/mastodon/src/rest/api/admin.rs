@@ -15,8 +15,8 @@
 use crate::actions::AdminActions;
 use crate::model::{
     AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
-    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry, AuditFilter,
-    DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome, DomainSeverity,
+    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
+    AuditFilter, DomainAllow, DomainBlock, DomainBlockDraft, DomainImportOutcome, DomainSeverity,
     EmailDomainBlock, FlagState, ModerationAction, NewScanner, NodeLog, Report, ReportDraft,
     ReportFilter, ReportState, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset,
     ScannerRule, Topology, TriggerOutcome, WarningPreset,
