@@ -15,6 +15,7 @@
 )]
 
 pub mod convert;
+pub mod note_actions;
 
 use core::fmt;
 
@@ -28,6 +29,7 @@ use serde_json::{Value, json};
 use url::Url;
 
 pub use convert::note_html;
+pub use note_actions::Reactions;
 
 /// One Misskey instance, one token, one transport.
 pub struct MisskeyInstance<T: Transport> {
