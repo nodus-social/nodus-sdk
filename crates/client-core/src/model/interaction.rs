@@ -346,12 +346,23 @@ pub struct ProfileUpdate {
 ///
 /// The instance stores the trimmed pair and reports validation failures against the
 /// row's 1-based position, so a caller that validates first can point at the same row.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+///
+/// The same row shape is read from an account and written back in a profile update: the
+/// read is the only side that carries [`ProfileField::verified_at`], because the instance
+/// mints that proof and no client can assert it.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProfileField {
     /// Label shown beside the value, e.g. `Pronouns`.
     pub name: String,
     /// The value, usually a link or a short line of text.
     pub value: String,
+    /// When the instance last verified that the value is a link the account controls.
+    ///
+    /// `null` for a row that was never verified or whose proof lapsed. A write leaves
+    /// this unset: the instance decides verification, so echoing a previously read
+    /// value would send a claim the account cannot make.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<String>,
 }
 
 impl ProfileField {
@@ -361,7 +372,15 @@ impl ProfileField {
         Self {
             name: name.into(),
             value: value.into(),
+            verified_at: None,
         }
+    }
+
+    /// When the instance verified the value; see [`ProfileField::verified_at`].
+    #[must_use]
+    pub fn verified_at(mut self, verified_at: impl Into<String>) -> Self {
+        self.verified_at = Some(verified_at.into());
+        self
     }
 }
 

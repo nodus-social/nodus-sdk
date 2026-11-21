@@ -94,6 +94,16 @@ pub struct Actor {
     /// Deprecated inverse of `indexable`; older instances still send it.
     #[serde(default)]
     pub noindex: Option<bool>,
+    /// The profile's metadata rows, as the instance returns them.
+    ///
+    /// Both `verify_credentials` and a profile update answer with these rows, and a
+    /// caller that renders a profile should read them here rather than keep a second
+    /// copy of the payload. An instance that omits the key, and an account with no
+    /// rows, both decode to an empty list: the wire has no unset state a caller has to
+    /// tell apart. Empty rows are skipped when serialising, so a client that reposts
+    /// the account does not invent a member the instance never sent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ProfileField>,
 }
 
 /// Mastodon's name for an [`Actor`]; kept for existing clients.
@@ -649,5 +659,71 @@ mod tests {
         assert_eq!(status.account.acct, "alice");
         assert!(!status.favourited);
         assert_eq!(status.emojis, Vec::new());
+    }
+
+    #[test]
+    fn an_account_decodes_its_metadata_rows() {
+        // `verify_credentials` and a profile update both answer with this array; the
+        // model keeps it so a caller does not hand-decode the payload beside the account.
+        let json = r#"{
+            "id": "1",
+            "acct": "alice",
+            "fields": [
+                {"name": "Website", "value": "https://alice.test", "verified_at": "2026-11-01T00:00:00.000Z"},
+                {"name": "Pronouns", "value": "she/her", "verified_at": null}
+            ]
+        }"#;
+
+        let account: Account = serde_json::from_str(json).expect("valid account");
+
+        assert_eq!(account.fields.len(), 2);
+        assert_eq!(account.fields[0].name, "Website");
+        assert_eq!(
+            account.fields[0].verified_at.as_deref(),
+            Some("2026-11-01T00:00:00.000Z")
+        );
+        assert_eq!(account.fields[1].verified_at, None);
+    }
+
+    #[test]
+    fn an_account_without_metadata_rows_still_decodes() {
+        // Instances that omit the key, and accounts with no rows, are not errors: an
+        // absent member means "no rows", not "could not read the account".
+        let json = r#"{"id": "1", "acct": "alice"}"#;
+
+        let account: Account = serde_json::from_str(json).expect("account without fields");
+
+        assert_eq!(account.fields, Vec::new());
+    }
+
+    #[test]
+    fn metadata_rows_round_trip_and_empty_rows_are_skipped() {
+        let account: Account = serde_json::from_str(
+            r#"{
+                "id": "1",
+                "acct": "alice",
+                "fields": [
+                    {"name": "Website", "value": "https://alice.test", "verified_at": "2026-11-01T00:00:00.000Z"},
+                    {"name": "Pronouns", "value": "she/her"}
+                ]
+            }"#,
+        )
+        .expect("valid account");
+
+        let encoded = serde_json::to_value(&account).expect("serialisable account");
+        let rows = encoded["fields"].as_array().expect("rows encoded");
+        assert_eq!(rows[0]["verified_at"], "2026-11-01T00:00:00.000Z");
+        assert!(rows[1].get("verified_at").is_none());
+        assert_eq!(
+            serde_json::from_value::<Account>(encoded).expect("round trip"),
+            account
+        );
+
+        let empty = Account {
+            fields: Vec::new(),
+            ..account
+        };
+        let encoded = serde_json::to_value(&empty).expect("serialisable account");
+        assert!(encoded.get("fields").is_none());
     }
 }

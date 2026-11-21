@@ -191,6 +191,7 @@ mod tests {
             discoverable: None,
             indexable: None,
             noindex: None,
+            fields: Vec::new(),
         }
     }
 

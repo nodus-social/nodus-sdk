@@ -2,7 +2,8 @@
 
 use nodus_client_core::model::{
     Account, CredentialSource, CustomEmoji, LocalId, MediaAttachment, MediaKind, Mention,
-    Notification, NotificationKind, Poll, PollOption, Relationship, Status, Tag, Visibility,
+    Notification, NotificationKind, Poll, PollOption, ProfileField, Relationship, Status, Tag,
+    Visibility,
 };
 use serde_json::Value;
 
@@ -63,7 +64,28 @@ pub fn account(value: &Value) -> Option<Account> {
         discoverable: value.get("isExplorable").and_then(Value::as_bool),
         indexable: None,
         noindex: None,
+        fields: profile_fields(value),
     })
+}
+
+/// Map Misskey's `fields` rows to the shared name/value shape.
+///
+/// Misskey has no verification proof, so every row arrives without `verified_at`.
+fn profile_fields(value: &Value) -> Vec<ProfileField> {
+    value
+        .get("fields")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| {
+                    Some(ProfileField::new(
+                        row.get("name")?.as_str()?,
+                        row.get("value")?.as_str()?,
+                    ))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Map a Misskey note to the status shape the views render.
@@ -552,6 +574,26 @@ mod tests {
             "host": null
         });
         assert_eq!(account(&user).expect("account").acct, "alice");
+    }
+
+    #[test]
+    fn misskey_profile_rows_keep_their_name_and_value() {
+        // Misskey has no verification proof, so the rows arrive unverified; dropping
+        // them would leave the model's `fields` empty for every Misskey account.
+        let user = serde_json::json!({
+            "id": "u1",
+            "username": "alice",
+            "fields": [
+                {"name": "Website", "value": "https://alice.test"},
+                {"name": "Pronouns", "value": "she/her"}
+            ]
+        });
+
+        let account = account(&user).expect("account");
+
+        assert_eq!(account.fields.len(), 2);
+        assert_eq!(account.fields[0].name, "Website");
+        assert_eq!(account.fields[0].verified_at, None);
     }
 
     #[test]
