@@ -9,10 +9,23 @@ use core::sync::atomic::{AtomicU64, Ordering};
 use crate::actions::{AccountActions, Browse, MediaActions, Search, StatusActions};
 use crate::model::{
     Account, Conversation, Draft, HistoryEntry, List, LocalId, MediaAttachment, Page, PageParams,
-    Poll, Relationship, SearchResults, Status,
+    Poll, ProfileField, ProfileUpdate, Relationship, SearchResults, Status,
 };
 use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
+
+/// The JSON body a profile change sends when it carries metadata rows.
+///
+/// Nodus reads the rows as `fields`; Mastodon reads the same list as `fields_attributes`.
+/// Sending both lets one request set rows on either server, and each ignores the name it
+/// does not know. The other members are flattened from [`ProfileUpdate`], which omits the
+/// ones that were left unset.
+#[derive(serde::Serialize)]
+struct ProfileCredentials<'a> {
+    #[serde(flatten)]
+    update: &'a ProfileUpdate,
+    fields_attributes: &'a [ProfileField],
+}
 
 /// Runs a status verb that answers with the status itself.
 async fn status_verb<T: Transport>(
@@ -156,6 +169,22 @@ impl<T: Transport> AccountActions for RestInstance<T> {
     }
 
     async fn update_profile(&self, update: &crate::model::ProfileUpdate) -> Result<Account> {
+        let url = self.url("/api/v1/accounts/update_credentials")?;
+        let upload = update.avatar_image.is_some() || update.header_image.is_some();
+        // `fields` is a nested list, which the endpoint's form encoding cannot spell, so a
+        // change that carries rows goes as JSON. An upload stays multipart because that
+        // is the only encoding that can carry the image bytes.
+        if let Some(fields) = update.fields.as_deref().filter(|_| !upload) {
+            let body = ProfileCredentials {
+                update,
+                fields_attributes: fields,
+            };
+            let body =
+                serde_json::to_vec(&body).map_err(|error| Error::Decode(error.to_string()))?;
+            return self
+                .fetch(self.patch_body(url, "application/json", body))
+                .await;
+        }
         let mut form: Vec<(&str, String)> = Vec::with_capacity(7);
         if let Some(display_name) = &update.display_name {
             form.push(("display_name", display_name.clone()));
@@ -178,7 +207,6 @@ impl<T: Transport> AccountActions for RestInstance<T> {
         if let Some(header) = &update.header {
             form.push(("header", header.clone()));
         }
-        let url = self.url("/api/v1/accounts/update_credentials")?;
         let upload = update.avatar_image.is_some() || update.header_image.is_some();
         if upload {
             let mut parts: Vec<Part<'_>> = form

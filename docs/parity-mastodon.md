@@ -311,8 +311,9 @@ All Nodus-only endpoints return 404 on Mastodon. The web FE guards admin screens
    - AccountActions::update_profile (actions.rs:158) sends: display_name, note, locked, bot, discoverable, avatar, header
    - Images upload inline: ProfileUpdate.avatar_image/header_image switch the write to
      multipart/form-data (patch_body, mod.rs:261); an image wins over a media id
-   - Mastodon also accepts: fields[] (profile metadata), source[privacy], source[sensitive], source[language]
-   - SDK cannot edit profile fields (links/metadata table) or default post settings
+   - ProfileUpdate.fields replaces the metadata table; the rows force a JSON body, so a
+     change that also uploads an image keeps multipart and cannot carry rows
+   - Default post settings (source[privacy], source[sensitive], source[language]) are still absent
 
 8. **Multipart boundary collision avoidance:**
    - MediaActions::upload_media (actions.rs:211) generates unique boundary checking payload (actions.rs:178-187)
@@ -330,7 +331,7 @@ All Nodus-only endpoints return 404 on Mastodon. The web FE guards admin screens
 
 4. **Follow/mute lack options**: No way to set `notify`, `reblogs`, `languages` on follow (mod.rs:101) or `notifications`, `duration` on mute (actions.rs:104). Clients stuck with SDK defaults.
 
-5. **Cannot edit profile fields**: ProfileUpdate (actions.rs:145) missing `fields[]` (links table). Users cannot set homepage/pronouns/etc via SDK.
+5. **Profile fields are JSON-only**: ProfileUpdate.fields sets rows, but a change that also uploads an image cannot carry them.
 
 6. **Filter surfaces split**: v1 filters are readable and writable (FilterV1Actions) but not converted to v2 `Filter`; a caller must handle both shapes when the instance version is unknown.
 

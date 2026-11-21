@@ -300,26 +300,69 @@ mod tests {
 /// Every field is optional and omitted fields are left alone: the wire treats an absent
 /// key as "unchanged", and a client that always sent the whole profile would overwrite a
 /// bio typed in another tab.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct ProfileUpdate {
     /// The display name; an empty string is a real value, not a missing one.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
     /// The bio, as plain text or limited HTML the instance sanitises.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
     /// Whether new follows need approval.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub locked: Option<bool>,
     /// Whether the account is marked as automated.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bot: Option<bool>,
     /// Whether the account may appear in discovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub discoverable: Option<bool>,
     /// The profile picture, as the id of an image already uploaded to the instance.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     /// The banner, as the id of an image already uploaded to the instance.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub header: Option<String>,
+    /// The profile's metadata rows, when the change replaces them.
+    ///
+    /// A save replaces the whole list: an empty list removes every row, and leaving this
+    /// unset leaves the rows alone. The server trims every name and value, skips a row
+    /// with both empty, and refuses with a 422 a list longer than six rows, a blank name
+    /// beside a non-blank value, markup, or two names equal once trimmed and lowercased;
+    /// the error names the row by its 1-based position. The rows travel in a JSON body
+    /// because the endpoint's form encoding cannot spell a nested list, so a change that
+    /// also uploads an image uses multipart and does not send the rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<ProfileField>>,
     /// The profile picture, to upload with this change.
+    #[serde(skip)]
     pub avatar_image: Option<ProfileImage>,
     /// The banner, to upload with this change.
+    #[serde(skip)]
     pub header_image: Option<ProfileImage>,
+}
+
+/// One row of the profile's name/value table.
+///
+/// The instance stores the trimmed pair and reports validation failures against the
+/// row's 1-based position, so a caller that validates first can point at the same row.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct ProfileField {
+    /// Label shown beside the value, e.g. `Pronouns`.
+    pub name: String,
+    /// The value, usually a link or a short line of text.
+    pub value: String,
+}
+
+impl ProfileField {
+    /// A row with a label and its value.
+    #[must_use]
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
+    }
 }
 
 /// An image sent with a profile change.
@@ -410,6 +453,13 @@ impl ProfileUpdate {
         self
     }
 
+    /// Replaces the profile's metadata rows; see [`ProfileUpdate::fields`].
+    #[must_use]
+    pub fn fields(mut self, fields: Vec<ProfileField>) -> Self {
+        self.fields = Some(fields);
+        self
+    }
+
     /// Whether the result says anything at all.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
@@ -420,6 +470,7 @@ impl ProfileUpdate {
             && self.discoverable.is_none()
             && self.avatar.is_none()
             && self.header.is_none()
+            && self.fields.is_none()
             && self.avatar_image.is_none()
             && self.header_image.is_none()
     }

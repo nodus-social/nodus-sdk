@@ -39,7 +39,7 @@ pub use instance::{
 };
 pub use interaction::{
     Conversation, HistoryEntry, List, Media, MediaAttachment, MediaKind, Mention, Poll, PollOption,
-    ProfileImage, ProfileUpdate, SearchResults, Tag, TagHistory,
+    ProfileField, ProfileImage, ProfileUpdate, SearchResults, Tag, TagHistory,
 };
 pub use markers::{Marker, MarkerTimeline, MarkerUpdate, Markers};
 pub use schedule::{ScheduledParams, ScheduledStatus};

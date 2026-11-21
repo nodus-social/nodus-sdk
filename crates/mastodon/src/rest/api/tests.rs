@@ -2,6 +2,8 @@ use core::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
 
+use serde_json::Value;
+
 use crate::actions::{
     AccountActions, AdminActions, Browse, FilterActions, FilterV1Actions, HighlightActions,
     InstanceMeta, MarkerActions, ScheduleActions, SettingsActions, StatusActions, TagActions,
@@ -9,7 +11,7 @@ use crate::actions::{
 use crate::api::InstanceApi;
 use crate::model::{
     Draft, FilterAction, FilterContext, FilterDraft, FilterV1Draft, LocalId, MarkerTimeline,
-    MarkerUpdate, PollDraft, ProfileImage, ProfileUpdate, Visibility,
+    MarkerUpdate, PollDraft, ProfileField, ProfileImage, ProfileUpdate, Visibility,
 };
 use crate::rest::{HttpRequest, HttpResponse, RestInstance, Transport};
 use crate::{Error, Instance, Result};
@@ -296,6 +298,7 @@ fn update_profile_sends_bot_and_discoverable_fields() {
         discoverable: Some(false),
         avatar: None,
         header: None,
+        fields: None,
         avatar_image: None,
         header_image: None,
     };
@@ -323,6 +326,69 @@ fn update_profile_sends_uploaded_pictures_by_id() {
     assert!(pairs.contains(&("avatar".to_owned(), "media-1".to_owned())));
     assert!(pairs.contains(&("header".to_owned(), "media-2".to_owned())));
     assert!(!pairs.iter().any(|(key, _)| key == "display_name"));
+}
+
+#[test]
+fn update_profile_without_fields_keeps_the_form_body() {
+    let (instance, requests) = instance_with(vec![ok_json(MINIMAL_ACCOUNT_JSON)]);
+    let update = ProfileUpdate::new().display_name("Alice").note("Hello");
+
+    block_on(instance.update_profile(&update)).expect("update_profile");
+
+    let recorded = requests.borrow();
+    let request = &recorded[0];
+    assert_eq!(
+        request.header("content-type"),
+        Some("application/x-www-form-urlencoded")
+    );
+    assert_eq!(
+        request.form_pairs(),
+        vec![
+            ("display_name".to_owned(), "Alice".to_owned()),
+            ("note".to_owned(), "Hello".to_owned()),
+        ]
+    );
+}
+
+#[test]
+fn update_profile_sends_an_empty_field_list_as_json() {
+    let (instance, requests) = instance_with(vec![ok_json(MINIMAL_ACCOUNT_JSON)]);
+    let update = ProfileUpdate::new()
+        .display_name("Alice")
+        .fields(Vec::new());
+
+    block_on(instance.update_profile(&update)).expect("update_profile");
+
+    let recorded = requests.borrow();
+    let request = &recorded[0];
+    assert_eq!(request.header("content-type"), Some("application/json"));
+    let body: Value =
+        serde_json::from_slice(request.body.as_deref().unwrap_or_default()).expect("json body");
+    assert_eq!(body["display_name"], "Alice");
+    assert_eq!(body["fields"], serde_json::json!([]));
+    assert_eq!(body["fields_attributes"], serde_json::json!([]));
+    assert!(body.get("note").is_none());
+}
+
+#[test]
+fn update_profile_sends_six_metadata_rows_in_order() {
+    let (instance, requests) = instance_with(vec![ok_json(MINIMAL_ACCOUNT_JSON)]);
+    let fields: Vec<ProfileField> = (1..=6)
+        .map(|row| ProfileField::new(format!("Row {row}"), format!("value {row}")))
+        .collect();
+    let update = ProfileUpdate::new().fields(fields);
+
+    block_on(instance.update_profile(&update)).expect("update_profile");
+
+    let recorded = requests.borrow();
+    let body: Value =
+        serde_json::from_slice(recorded[0].body.as_deref().unwrap_or_default()).expect("json body");
+    let rows = body["fields"].as_array().expect("fields array");
+    assert_eq!(rows.len(), 6);
+    assert_eq!(rows[0]["name"], "Row 1");
+    assert_eq!(rows[5]["name"], "Row 6");
+    assert_eq!(rows[5]["value"], "value 6");
+    assert_eq!(body["fields_attributes"], body["fields"]);
 }
 
 #[test]
@@ -574,6 +640,7 @@ fn update_profile_uploads_images_as_multipart_parts() {
         discoverable: None,
         avatar: None,
         header: None,
+        fields: None,
         avatar_image: Some(ProfileImage::new(b"avatar-bytes", "image/png")),
         header_image: None,
     };
