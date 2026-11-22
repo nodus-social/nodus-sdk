@@ -31,6 +31,15 @@
 //! Claiming `false` instead was rejected because it hides a working screen from the one
 //! user who could use it — the same class of error as drawing a control that 404s.
 //!
+//! ## Admin pages with no API are declared
+//!
+//! An administration page rendered by the server's own HTML frontend has no client API to
+//! probe, so its row says `DECLARED`, names the page, and cites the server's route table.
+//! Declaring such a row `true` is what lets the client draw the screen; the alternative —
+//! probing an invented API path, getting a `404`, and calling the page absent — would
+//! hide a page the server does serve. `admin_protocol` is different: that page is
+//! client-side detection with no server route at all, so it stays `false` everywhere.
+//!
 //! The per-feature evidence, including the status code behind each decision, lives in
 //! the `decision` module, next to the table it justifies.
 //!
@@ -115,6 +124,26 @@ mod tests {
         (Feature::Preferences, false, true, false),
         (Feature::Streaming, false, true, true),
         (Feature::Tags, false, true, false),
+        (Feature::AdminOverview, false, true, true),
+        (Feature::AdminAnnouncements, false, true, true),
+        (Feature::AdminAudit, false, true, true),
+        (Feature::AdminDomains, false, true, false),
+        (Feature::AdminEmail, false, true, false),
+        (Feature::AdminEscalation, false, false, false),
+        (Feature::AdminFederation, false, false, true),
+        (Feature::AdminProtocol, false, false, false),
+        (Feature::AdminReplies, false, true, false),
+        (Feature::AdminRules, false, true, true),
+        (Feature::AdminScanners, false, false, false),
+        (Feature::AdminSettings, false, true, true),
+        (Feature::AdminTopology, false, false, false),
+        (Feature::ModerationAccounts, false, true, true),
+        (Feature::ModerationAppeals, false, true, false),
+        (Feature::ModerationFederation, false, true, true),
+        (Feature::ModerationFlags, false, false, false),
+        (Feature::ModerationMedia, false, false, false),
+        (Feature::ModerationRegistrations, false, true, true),
+        (Feature::ModerationReports, false, true, true),
     ];
 
     #[test]

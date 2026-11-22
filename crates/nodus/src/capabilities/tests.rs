@@ -104,14 +104,56 @@ fn the_active_set_round_trips_through_serde_as_names() {
 }
 
 #[test]
-fn a_nodus_payload_with_all_forty_two_names_leaves_nothing_unknown() {
+fn the_published_admin_and_moderation_pages_map_to_their_variants() {
+    let names = [
+        "admin_overview",
+        "admin_announcements",
+        "admin_audit",
+        "admin_domains",
+        "admin_email",
+        "admin_escalation",
+        "admin_federation",
+        "admin_protocol",
+        "admin_replies",
+        "admin_rules",
+        "admin_scanners",
+        "admin_settings",
+        "admin_topology",
+        "moderation_accounts",
+        "moderation_appeals",
+        "moderation_federation",
+        "moderation_flags",
+        "moderation_media",
+        "moderation_registrations",
+        "moderation_reports",
+    ];
+    let owned: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    let capabilities = Capabilities::from_published(&owned);
+    assert_eq!(capabilities.features.len(), 20);
+    assert!(
+        Capabilities::from_published(&["moderation_rules".to_owned()])
+            .supports(Feature::ModerationRules),
+        "moderation_rules is the existing variant, not a new spelling"
+    );
+    assert_eq!(capabilities.unknown, Vec::<String>::new());
+    for feature in [
+        Feature::AdminOverview,
+        Feature::AdminTopology,
+        Feature::ModerationRegistrations,
+    ] {
+        assert!(capabilities.supports(feature), "{feature:?}");
+    }
+}
+
+#[test]
+fn a_nodus_payload_with_all_sixty_two_names_leaves_nothing_unknown() {
     let names: Vec<String> = crate::Feature::ALL
         .iter()
         .map(|feature| feature.as_str().to_owned())
         .collect();
-    assert_eq!(names.len(), 42);
+    assert_eq!(names.len(), 62);
     let capabilities = Capabilities::from_published(&names);
-    assert_eq!(capabilities.features.len(), 42);
+    assert_eq!(capabilities.features.len(), 62);
     assert_eq!(capabilities.unknown, Vec::<String>::new());
     assert_eq!(
         capabilities.features,

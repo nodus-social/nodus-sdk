@@ -10,6 +10,21 @@ fn every_feature_spelling_round_trips() {
 }
 
 #[test]
+fn no_two_features_share_a_wire_spelling() {
+    let mut names: Vec<&str> = Feature::ALL
+        .iter()
+        .map(|feature| feature.as_str())
+        .collect();
+    names.sort_unstable();
+    let mut unique = names.clone();
+    unique.dedup();
+    assert_eq!(
+        names, unique,
+        "a duplicate wire spelling reuses an existing bit"
+    );
+}
+
+#[test]
 fn an_unknown_spelling_is_not_a_feature_rather_than_an_error() {
     assert_eq!(Feature::parse("telepathy"), None);
 }
@@ -23,7 +38,7 @@ fn indices_are_the_declaration_order_and_unique() {
 
 #[test]
 fn the_names_nodus_publishes_all_parse() {
-    // `nodus-backend/crates/api/src/meta.rs` publishes exactly these 42 names.
+    // `nodus-backend/crates/api/src/meta.rs` publishes exactly these 62 names.
     let published = [
         "feed_accounts",
         "events",
@@ -67,6 +82,26 @@ fn the_names_nodus_publishes_all_parse() {
         "preferences",
         "streaming",
         "tags",
+        "admin_overview",
+        "admin_announcements",
+        "admin_audit",
+        "admin_domains",
+        "admin_email",
+        "admin_escalation",
+        "admin_federation",
+        "admin_protocol",
+        "admin_replies",
+        "admin_rules",
+        "admin_scanners",
+        "admin_settings",
+        "admin_topology",
+        "moderation_accounts",
+        "moderation_appeals",
+        "moderation_federation",
+        "moderation_flags",
+        "moderation_media",
+        "moderation_registrations",
+        "moderation_reports",
     ];
     assert_eq!(published.len(), Feature::COUNT);
     for name in published {
@@ -123,6 +158,26 @@ fn the_vocabulary_covers_the_published_list_exactly() {
         "preferences",
         "streaming",
         "tags",
+        "admin_overview",
+        "admin_announcements",
+        "admin_audit",
+        "admin_domains",
+        "admin_email",
+        "admin_escalation",
+        "admin_federation",
+        "admin_protocol",
+        "admin_replies",
+        "admin_rules",
+        "admin_scanners",
+        "admin_settings",
+        "admin_topology",
+        "moderation_accounts",
+        "moderation_appeals",
+        "moderation_federation",
+        "moderation_flags",
+        "moderation_media",
+        "moderation_registrations",
+        "moderation_reports",
     ];
     ours.sort_unstable();
     backend.sort_unstable();

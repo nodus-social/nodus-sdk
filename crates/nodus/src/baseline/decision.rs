@@ -6,6 +6,10 @@
 //! `POST /api/endpoints`), because probing one invented path proves only that path is
 //! absent.
 //!
+//! `moderation_rules` is not a new spelling: it is the existing `Feature::ModerationRules`
+//! row above, whose bit is unchanged, and it is the moderation-patterns section of the
+//! vocabulary. The published list therefore names 62 capabilities, not 63.
+//!
 //! | Feature | Mastodon 4.6.3 | Misskey 2026.11.0 |
 //! |---|---|---|
 //! | `admin` | yes — `403 GET /api/v1/admin/reports` | yes — `200 POST /api/admin/meta` |
@@ -50,6 +54,26 @@
 //! | `preferences` | yes — `200 GET /api/v1/preferences` | no — `404 POST /api/i/preferences`; `i/registry/get` is client storage |
 //! | `streaming` | yes — `301 GET /api/v1/streaming` to the canonical host; the streaming process ships with Mastodon but is not started in this lab | yes — `503 GET /streaming` without a websocket upgrade |
 //! | `tags` | yes — `200 GET /api/v1/tags/test`, follow/unfollow `200` | no — `404 POST /api/hashtags/follow`; `hashtags/show` is a tag page only |
+//! | `admin_overview` | yes — DECLARED: `/admin/dashboard` is in `rails routes`, but the page has no API of its own | yes — `200 POST /api/admin/meta` |
+//! | `admin_announcements` | yes — DECLARED: `/admin/announcements` is in `rails routes`; the public `/api/v1/announcements` is a different surface | yes — `200 POST /api/admin/announcements/list` |
+//! | `admin_audit` | yes — DECLARED: `/admin/action_logs` is in `rails routes`; `GET /api/v1/admin/audit` is not routed | yes — `200 POST /api/admin/show-moderation-logs` (Misskey's admin action log) |
+//! | `admin_domains` | yes — `403 GET /api/v1/admin/domain_allows` | no — no allow-list; instance control is `admin_federation` |
+//! | `admin_email` | yes — `403 GET /api/v1/admin/email_domain_blocks` | no concept, no route |
+//! | `admin_escalation` | no concept, no route | no concept, no route |
+//! | `admin_federation` | no — no client route for the delivery queue | yes — `200 POST /api/admin/queue/queues` (delivery queue page) |
+//! | `admin_protocol` | no — the page is client-side detection, the server contributes no route | no — same client-side detection |
+//! | `admin_replies` | yes — DECLARED: `/admin/warning_presets` is in `rails routes`; `GET /api/v1/admin/warning_presets` is not routed | no concept, no route |
+//! | `admin_rules` | yes — DECLARED: `/admin/rules` is in `rails routes`, but the page has no API of its own | yes — DECLARED: rules are edited through `POST /api/admin/update-meta` `serverRules`, with no separate route |
+//! | `admin_scanners` | no concept, no route | no concept, no route |
+//! | `admin_settings` | yes — DECLARED: `/admin/settings/{branding,registrations,about,…}` is in `rails routes`; the settings have no client API | yes — `200 POST /api/admin/meta` (settings live in the single admin meta document) |
+//! | `admin_topology` | no concept, no route | no — `admin/server-info` is host health, not a process graph |
+//! | `moderation_accounts` | yes — `403 GET /api/v1/admin/accounts` | yes — `200 POST /api/admin/show-users` |
+//! | `moderation_appeals` | yes — DECLARED: `/admin/disputes/appeals` is in `rails routes`, but the page has no client API | no concept, no route |
+//! | `moderation_federation` | yes — `403 GET /api/v1/admin/domain_blocks` | yes — `400 POST /api/admin/federation/update-instance` (instance block/silence) |
+//! | `moderation_flags` | no — a scanner-flag queue needs `admin_scanners`, which is absent | no concept, no route |
+//! | `moderation_media` | no — no quarantine queue | no — `admin/drive/files` is storage management, not quarantine |
+//! | `moderation_registrations` | yes — `403 GET /api/v2/admin/accounts` (pending registrations) | yes — `200 POST /api/admin/invite/list` |
+//! | `moderation_reports` | yes — `403 GET /api/v1/admin/reports` | yes — `200 POST /api/admin/abuse-user-reports` |
 
 use crate::feature::Feature;
 
@@ -107,5 +131,25 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         Feature::Preferences => [false, true, false],
         Feature::Streaming => [false, true, true],
         Feature::Tags => [false, true, false],
+        Feature::AdminOverview => [false, true, true],
+        Feature::AdminAnnouncements => [false, true, true],
+        Feature::AdminAudit => [false, true, true],
+        Feature::AdminDomains => [false, true, false],
+        Feature::AdminEmail => [false, true, false],
+        Feature::AdminEscalation => [false, false, false],
+        Feature::AdminFederation => [false, false, true],
+        Feature::AdminProtocol => [false, false, false],
+        Feature::AdminReplies => [false, true, false],
+        Feature::AdminRules => [false, true, true],
+        Feature::AdminScanners => [false, false, false],
+        Feature::AdminSettings => [false, true, true],
+        Feature::AdminTopology => [false, false, false],
+        Feature::ModerationAccounts => [false, true, true],
+        Feature::ModerationAppeals => [false, true, false],
+        Feature::ModerationFederation => [false, true, true],
+        Feature::ModerationFlags => [false, false, false],
+        Feature::ModerationMedia => [false, false, false],
+        Feature::ModerationRegistrations => [false, true, true],
+        Feature::ModerationReports => [false, true, true],
     }
 }

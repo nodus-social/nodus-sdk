@@ -102,6 +102,46 @@ pub enum Feature {
     Streaming,
     /// Tag pages and following a tag (`/api/v1/tags/:name`).
     Tags,
+    /// Administration: the dashboard of counts and pending decisions.
+    AdminOverview,
+    /// Administration: instance announcements and their publish controls.
+    AdminAnnouncements,
+    /// Administration: the log of actions staff took.
+    AdminAudit,
+    /// Administration: the domains this instance allows in.
+    AdminDomains,
+    /// Administration: mail domains, i.e. which addresses may sign up.
+    AdminEmail,
+    /// Administration: the escalation policy and its ladder of strikes.
+    AdminEscalation,
+    /// Administration: federation deliveries still owed to peers, and why they stopped.
+    AdminFederation,
+    /// Administration: what protocol the server speaks, as the client detected it.
+    AdminProtocol,
+    /// Administration: canned replies (Mastodon calls them warning presets).
+    AdminReplies,
+    /// Administration: the instance's published rules and their order.
+    AdminRules,
+    /// Administration: content scanners and their label thresholds.
+    AdminScanners,
+    /// Administration: instance settings such as branding and registration policy.
+    AdminSettings,
+    /// Administration: the instance's own processes and their recent logs.
+    AdminTopology,
+    /// Moderation: account standing and the decisions a moderator can take.
+    ModerationAccounts,
+    /// Moderation: appeals against a decision about a person.
+    ModerationAppeals,
+    /// Moderation: domains this instance refuses.
+    ModerationFederation,
+    /// Moderation: the queue of content a scanner flagged for a person to judge.
+    ModerationFlags,
+    /// Moderation: quarantined media awaiting release or deletion.
+    ModerationMedia,
+    /// Moderation: who may join and who is waiting to be admitted.
+    ModerationRegistrations,
+    /// Moderation: the report queue.
+    ModerationReports,
 }
 
 impl Feature {
@@ -109,7 +149,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 42;
+    pub const COUNT: usize = 62;
 
     /// Every capability this build names.
     ///
@@ -158,6 +198,26 @@ impl Feature {
         Self::Preferences,
         Self::Streaming,
         Self::Tags,
+        Self::AdminOverview,
+        Self::AdminAnnouncements,
+        Self::AdminAudit,
+        Self::AdminDomains,
+        Self::AdminEmail,
+        Self::AdminEscalation,
+        Self::AdminFederation,
+        Self::AdminProtocol,
+        Self::AdminReplies,
+        Self::AdminRules,
+        Self::AdminScanners,
+        Self::AdminSettings,
+        Self::AdminTopology,
+        Self::ModerationAccounts,
+        Self::ModerationAppeals,
+        Self::ModerationFederation,
+        Self::ModerationFlags,
+        Self::ModerationMedia,
+        Self::ModerationRegistrations,
+        Self::ModerationReports,
     ];
 }
 
