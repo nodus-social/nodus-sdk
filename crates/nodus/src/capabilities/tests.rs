@@ -102,3 +102,20 @@ fn the_active_set_round_trips_through_serde_as_names() {
     let back: Capabilities = serde_json::from_value(value).expect("deserialise");
     assert_eq!(back, capabilities);
 }
+
+#[test]
+fn a_nodus_payload_with_all_forty_two_names_leaves_nothing_unknown() {
+    let names: Vec<String> = crate::Feature::ALL
+        .iter()
+        .map(|feature| feature.as_str().to_owned())
+        .collect();
+    assert_eq!(names.len(), 42);
+    let capabilities = Capabilities::from_published(&names);
+    assert_eq!(capabilities.features.len(), 42);
+    assert_eq!(capabilities.unknown, Vec::<String>::new());
+    assert_eq!(
+        capabilities.features,
+        crate::ActiveFeatures::ALL,
+        "every published name must map to its variant"
+    );
+}

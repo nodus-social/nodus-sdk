@@ -31,37 +31,8 @@
 //! Claiming `false` instead was rejected because it hides a working screen from the one
 //! user who could use it — the same class of error as drawing a control that 404s.
 //!
-//! | Feature | Mastodon 4.6.3 | Misskey 2026.11.0 |
-//! |---|---|---|
-//! | `admin` | yes — `403 GET /api/v1/admin/reports` | yes — `200 POST /api/admin/meta` |
-//! | `moderation` | yes — `403 GET /api/v1/admin/reports` | yes — `200 POST /api/admin/abuse-user-reports` |
-//! | `scanners` | no concept, no route | no concept, no route |
-//! | `topology` | no — `instance/peers` is a peer list, not a graph | no — `federation/instances` is a list |
-//! | `protocol` | no — no route for `GET /api/v1/meta` | no — `POST /api/meta` has no feature list |
-//! | `remote_blocks` | yes — `403 GET /api/v1/admin/domain_blocks` | yes — `400 POST /api/admin/federation/update-instance` |
-//! | `polls` | yes — `400 POST /api/v1/polls/:id/votes` | yes — `400 POST /api/notes/polls/vote` |
-//! | `batch` | no concept, no route | no concept, no route |
-//! | `appeals` | no — `404 GET /api/v1/appeals`, only a web flow | no concept, no route |
-//! | `instance_rules` | yes — `200 GET /api/v1/instance/rules` | yes — `200 POST /api/meta` `serverRules` |
-//! | `moderation_rules` | no — `admin/rules` is the instance rules | no concept, no route |
-//! | `media_quarantine` | no concept, no route | no concept, no route |
-//! | `block_lists` | no — `/api/v1/blocks` is the caller's own list | no — `i/export-blocking` is the own list |
-//! | `moderation_stats` | no — `admin/measures` is instance statistics | no — `admin/get-index-stats` is instance statistics |
-//! | `remote_accounts` | yes — `403 GET /api/v1/admin/accounts` | yes — `200 POST /api/admin/show-users` |
-//! | `warnings` | no — `404 GET /api/v1/admin/warnings` | no concept, no route |
-//! | `escalation` | no concept, no route | no concept, no route |
-//! | `federation_delivery` | no concept, no route | no concept, no route |
-//! | `domain_pauses` | no concept, no route | no — `admin/queue/pause` pauses the queue |
-//! | `settings_transfer` | no concept, no route | no — `i/registry/get-all` only stores settings |
-//! | `report_forwarding` | no — forwarding is automatic, no route | yes — `400 POST /api/admin/forward-abuse-user-report` |
-//! | `account_deletion` | no client route | yes — `400 POST /api/i/delete-account` |
-//! | `drive` | no concept, no route | yes — `400 POST /api/drive/files/create` |
-//! | `drive_share` | no concept, no route | yes — `drive/files/create` with `isLink` |
-//! | `drive_attach` | no concept, no route | yes — `400 POST /api/notes/create` `fileIds` |
-//! | `feed_accounts` | no concept, no route | no concept, no route |
-//! | `events` | no concept, no route | no concept, no route |
-//! | `sync_token` | no concept, no route | no concept, no route |
-//! | `favourites` | yes — `200 GET /api/v1/favourites` | yes — `200 POST /api/i/favorites` |
+//! The per-feature evidence, including the status code behind each decision, lives in
+//! the `decision` module, next to the table it justifies.
 //!
 //! Everything Nodus adds beyond a protocol's own client API stays `false`.
 
@@ -69,49 +40,9 @@ use crate::active::ActiveFeatures;
 use crate::capabilities::Provider;
 use crate::feature::Feature;
 
-/// One feature decided for all three protocols, in `Feature::ALL` order.
-///
-/// The exhaustive `match` is the compile-time gate: a new `Feature` variant is a
-/// non-exhaustive-match error here, so it cannot reach a caller without a decision for
-/// Nodus, Mastodon and Misskey. The three bools are `[nodus, mastodon, misskey]`.
-///
-/// Nodus is `false` in every row on purpose: it publishes `/api/v1/meta`, so its answer
-/// is the published list, never a baseline guess. The flag exists so the compiler still
-/// asks about Nodus when a feature is added, even though the runtime answer ignores it.
-#[allow(clippy::match_same_arms)] // one arm per Feature keeps each decision visible
-const fn decision(feature: Feature) -> [bool; 3] {
-    match feature {
-        Feature::Admin => [false, true, true],
-        Feature::Moderation => [false, true, true],
-        Feature::Scanners => [false, false, false],
-        Feature::Topology => [false, false, false],
-        Feature::Protocol => [false, false, false],
-        Feature::RemoteBlocks => [false, true, true],
-        Feature::Polls => [false, true, true],
-        Feature::Batch => [false, false, false],
-        Feature::Appeals => [false, false, false],
-        Feature::InstanceRules => [false, true, true],
-        Feature::ModerationRules => [false, false, false],
-        Feature::MediaQuarantine => [false, false, false],
-        Feature::BlockLists => [false, false, false],
-        Feature::ModerationStats => [false, false, false],
-        Feature::RemoteAccounts => [false, true, true],
-        Feature::Warnings => [false, false, false],
-        Feature::Escalation => [false, false, false],
-        Feature::FederationDelivery => [false, false, false],
-        Feature::DomainPauses => [false, false, false],
-        Feature::SettingsTransfer => [false, false, false],
-        Feature::ReportForwarding => [false, false, true],
-        Feature::AccountDeletion => [false, false, true],
-        Feature::Drive => [false, false, true],
-        Feature::DriveShare => [false, false, true],
-        Feature::DriveAttach => [false, false, true],
-        Feature::FeedAccounts => [false, false, false],
-        Feature::Events => [false, false, false],
-        Feature::SyncToken => [false, false, false],
-        Feature::Favourites => [false, true, true],
-    }
-}
+mod decision;
+
+use decision::decision;
 
 /// The active set a provider serves when it publishes no capability list.
 ///
@@ -171,6 +102,19 @@ mod tests {
         (Feature::Events, false, false, false),
         (Feature::SyncToken, false, false, false),
         (Feature::Favourites, false, true, true),
+        (Feature::Bookmarks, false, true, false),
+        (Feature::Conversations, false, true, false),
+        (Feature::Lists, false, true, true),
+        (Feature::Filters, false, true, false),
+        (Feature::ScheduledStatuses, false, true, false),
+        (Feature::Notifications, false, true, true),
+        (Feature::Announcements, false, true, true),
+        (Feature::Search, false, true, true),
+        (Feature::Directory, false, true, true),
+        (Feature::Markers, false, true, false),
+        (Feature::Preferences, false, true, false),
+        (Feature::Streaming, false, true, true),
+        (Feature::Tags, false, true, false),
     ];
 
     #[test]
@@ -212,5 +156,38 @@ mod tests {
     fn favourites_is_served_by_mastodon_and_misskey() {
         assert!(active(Provider::Mastodon).contains(Feature::Favourites));
         assert!(active(Provider::Misskey).contains(Feature::Favourites));
+    }
+
+    #[test]
+    fn misskey_bookmarks_are_absent_while_its_favourites_are_served() {
+        let misskey = active(Provider::Misskey);
+        assert!(misskey.contains(Feature::Favourites));
+        assert!(!misskey.contains(Feature::Bookmarks));
+        assert!(active(Provider::Mastodon).contains(Feature::Bookmarks));
+    }
+
+    #[test]
+    fn misskey_serves_the_collections_it_has_routes_for() {
+        let misskey = active(Provider::Misskey);
+        for feature in [
+            Feature::Lists,
+            Feature::Notifications,
+            Feature::Announcements,
+            Feature::Search,
+            Feature::Directory,
+            Feature::Streaming,
+        ] {
+            assert!(misskey.contains(feature), "misskey {feature:?}");
+        }
+        for feature in [
+            Feature::Conversations,
+            Feature::Filters,
+            Feature::ScheduledStatuses,
+            Feature::Markers,
+            Feature::Preferences,
+            Feature::Tags,
+        ] {
+            assert!(!misskey.contains(feature), "misskey {feature:?}");
+        }
     }
 }

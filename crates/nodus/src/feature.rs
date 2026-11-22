@@ -76,6 +76,32 @@ pub enum Feature {
     SyncToken,
     /// `GET /api/v1/favourites`: the account's saved posts.
     Favourites,
+    /// `GET /api/v1/bookmarks`: posts saved for later rather than starred.
+    Bookmarks,
+    /// Direct-message threads (`GET /api/v1/conversations`).
+    Conversations,
+    /// Curated timelines (`/api/v1/lists`).
+    Lists,
+    /// Keyword filters applied to timelines and notifications (`/api/v2/filters`).
+    Filters,
+    /// Posts queued for a later publish time (`/api/v1/scheduled_statuses`).
+    ScheduledStatuses,
+    /// The notification inbox (`/api/v1/notifications`).
+    Notifications,
+    /// Instance announcements (`/api/v1/announcements`).
+    Announcements,
+    /// Full-text and account search (`/api/v2/search`).
+    Search,
+    /// The local profile directory (`/api/v1/directory`).
+    Directory,
+    /// Read positions per timeline (`/api/v1/markers`).
+    Markers,
+    /// Server-held posting defaults (`/api/v1/preferences`).
+    Preferences,
+    /// Live updates over the streaming API (`/api/v1/streaming`).
+    Streaming,
+    /// Tag pages and following a tag (`/api/v1/tags/:name`).
+    Tags,
 }
 
 impl Feature {
@@ -83,7 +109,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 29;
+    pub const COUNT: usize = 42;
 
     /// Every capability this build names.
     ///
@@ -119,91 +145,24 @@ impl Feature {
         Self::Events,
         Self::SyncToken,
         Self::Favourites,
+        Self::Bookmarks,
+        Self::Conversations,
+        Self::Lists,
+        Self::Filters,
+        Self::ScheduledStatuses,
+        Self::Notifications,
+        Self::Announcements,
+        Self::Search,
+        Self::Directory,
+        Self::Markers,
+        Self::Preferences,
+        Self::Streaming,
+        Self::Tags,
     ];
-
-    /// Position in declaration order, used as the bit index in [`ActiveFeatures`].
-    ///
-    /// An exhaustive match rather than `self as usize`: a new variant must be given a
-    /// slot explicitly, and it cannot silently alias an existing feature's bit.
-    #[must_use]
-    pub const fn index(self) -> usize {
-        match self {
-            Self::Admin => 0,
-            Self::Moderation => 1,
-            Self::Scanners => 2,
-            Self::Topology => 3,
-            Self::Protocol => 4,
-            Self::RemoteBlocks => 5,
-            Self::Polls => 6,
-            Self::Batch => 7,
-            Self::Appeals => 8,
-            Self::InstanceRules => 9,
-            Self::ModerationRules => 10,
-            Self::MediaQuarantine => 11,
-            Self::BlockLists => 12,
-            Self::ModerationStats => 13,
-            Self::RemoteAccounts => 14,
-            Self::Warnings => 15,
-            Self::Escalation => 16,
-            Self::FederationDelivery => 17,
-            Self::DomainPauses => 18,
-            Self::SettingsTransfer => 19,
-            Self::ReportForwarding => 20,
-            Self::AccountDeletion => 21,
-            Self::Drive => 22,
-            Self::DriveShare => 23,
-            Self::DriveAttach => 24,
-            Self::FeedAccounts => 25,
-            Self::Events => 26,
-            Self::SyncToken => 27,
-            Self::Favourites => 28,
-        }
-    }
-
-    /// The wire spelling, which is also what the server advertises.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Admin => "admin",
-            Self::Moderation => "moderation",
-            Self::Scanners => "scanners",
-            Self::Topology => "topology",
-            Self::Protocol => "protocol",
-            Self::RemoteBlocks => "remote_blocks",
-            Self::Polls => "polls",
-            Self::Batch => "batch",
-            Self::Appeals => "appeals",
-            Self::InstanceRules => "instance_rules",
-            Self::ModerationRules => "moderation_rules",
-            Self::MediaQuarantine => "media_quarantine",
-            Self::BlockLists => "block_lists",
-            Self::ModerationStats => "moderation_stats",
-            Self::RemoteAccounts => "remote_accounts",
-            Self::Warnings => "warnings",
-            Self::Escalation => "escalation",
-            Self::FederationDelivery => "federation_delivery",
-            Self::DomainPauses => "domain_pauses",
-            Self::SettingsTransfer => "settings_transfer",
-            Self::ReportForwarding => "report_forwarding",
-            Self::AccountDeletion => "account_deletion",
-            Self::Drive => "drive",
-            Self::DriveShare => "drive_share",
-            Self::DriveAttach => "drive_attach",
-            Self::FeedAccounts => "feed_accounts",
-            Self::Events => "events",
-            Self::SyncToken => "sync_token",
-            Self::Favourites => "favourites",
-        }
-    }
-
-    /// Parses a wire spelling; an unknown name is `None`, never an error.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|feature| feature.as_str() == value)
-    }
 }
+
+mod index;
+mod wire;
 
 const _: () = assert!(Feature::COUNT == Feature::ALL.len());
 
