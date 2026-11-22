@@ -1,52 +1,46 @@
 //! What the server says it can do.
 //!
-//! The answer comes from `GET /api/v1/meta`, which we own: a Mastodon instance would
-//! 404 it, and that 404 is itself the answer ("no extensions"). Unknown feature names
-//! are kept and ignored rather than rejected, so a server may ship a feature the client
-//! predates without breaking it.
+//! Nodus answers from `GET /api/v1/meta`, which we own: a Mastodon instance would 404
+//! it, and that 404 is itself the answer ("no extensions"). Mastodon and Misskey
+//! publish no capability list at all, so for them the SDK answers from a documented
+//! baseline in [`crate::baseline`] instead of pretending "no answer" means "nothing".
+//!
+//! Parsing is tolerant in both directions. A name the server advertises that this
+//! build does not know is kept in [`Capabilities::unknown`] rather than dropped, so a
+//! newer server still informs an older client; a name this build knows but the server
+//! omits simply reads as unsupported.
 
 use serde::{Deserialize, Serialize};
 
-/// A Nodus extension a server may implement.
+pub use crate::feature::Feature;
+
+/// Which protocol a server speaks, as far as capability answers go.
 ///
-/// Deliberately a closed set: a free-form string would let two servers claim the same
-/// word for different behaviour, and the client cannot defend against that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+/// The distinction decides where the answer comes from: Nodus publishes a list, the
+/// other two are answered from the SDK's [`crate::baseline`] because they publish nothing.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 #[serde(rename_all = "snake_case")]
-pub enum Feature {
-    /// `GET /api/v1/feed/accounts`: recommendations, server-side.
-    FeedAccounts,
-    /// `POST /api/v1/events`: interaction feedback is accepted.
-    Events,
-    /// `PUT /api/v1/sync/token`: the server keeps an encrypted token and syncs follows.
-    SyncToken,
-    /// `POST /api/v1/batch`: several reads in one round trip.
-    Batch,
+pub enum Provider {
+    /// The Nodus extensions, where the published `features` list is authoritative.
+    Nodus,
+    /// The Mastodon client API (`/api/v1/*`).
+    #[default]
+    Mastodon,
+    /// The Misskey client API (`/api/*`).
+    Misskey,
 }
 
-impl Feature {
-    /// The wire spelling, which is also what the server advertises.
+impl Provider {
+    /// The name used in logs, settings and state.
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::FeedAccounts => "feed_accounts",
-            Self::Events => "events",
-            Self::SyncToken => "sync_token",
-            Self::Batch => "batch",
+            Self::Nodus => "nodus",
+            Self::Mastodon => "mastodon",
+            Self::Misskey => "misskey",
         }
-    }
-
-    /// Parses a wire spelling; unknown names are not errors.
-    #[must_use]
-    pub fn parse(value: &str) -> Option<Self> {
-        [
-            Self::FeedAccounts,
-            Self::Events,
-            Self::SyncToken,
-            Self::Batch,
-        ]
-        .into_iter()
-        .find(|feature| feature.as_str() == value)
     }
 }
 
@@ -59,16 +53,47 @@ impl Feature {
 pub struct Capabilities {
     /// Contract version the server speaks, e.g. `0.1.0`.
     pub contract: String,
-    /// Features it advertises.
+    /// The provider whose answer this is.
+    #[serde(default)]
+    pub provider: Provider,
+    /// Features it advertises. Only meaningful for [`Provider::Nodus`].
+    #[serde(default)]
     pub features: Vec<Feature>,
+    /// Feature names the server advertised that this build does not know.
+    ///
+    /// Kept rather than dropped: a newer server may gate a surface behind a name an
+    /// older client has never heard of, and the caller can still show that name in a
+    /// diagnostics screen instead of silently losing it.
+    #[serde(default)]
+    pub unknown: Vec<String>,
 }
 
 impl Capabilities {
-    /// A server with no extensions — a plain Mastodon instance, or our own API before
-    /// anyone signed in.
+    /// A plain Mastodon instance: no Nodus extensions, but its baseline surfaces work.
+    ///
+    /// Also the value before anything has been negotiated, which is why it is the
+    /// default: the compatibility floor is the only answer that is never a lie.
     #[must_use]
     pub fn mastodon() -> Self {
-        Self::default()
+        Self {
+            provider: Provider::Mastodon,
+            ..Self::default()
+        }
+    }
+
+    /// A Misskey instance, answered from the documented baseline.
+    #[must_use]
+    pub fn misskey() -> Self {
+        Self {
+            provider: Provider::Misskey,
+            ..Self::default()
+        }
+    }
+
+    /// The provider whose baseline or list answers [`Capabilities::supports`].
+    #[must_use]
+    pub const fn provider(&self) -> Provider {
+        self.provider
     }
 
     /// Whether the server runs Nodus's own extensions.
@@ -78,33 +103,40 @@ impl Capabilities {
     /// this to skip a request that can only 404 there.
     #[must_use]
     pub fn knows_extensions(&self) -> bool {
-        !self.contract.is_empty()
+        self.provider == Provider::Nodus && !self.contract.is_empty()
     }
 
-    /// Whether the server advertises `feature`.
+    /// Whether the server serves `feature`.
+    ///
+    /// Nodus is answered from its published list — a feature it does not list is not
+    /// served. Mastodon and Misskey publish no list, so they are answered from the
+    /// documented baseline in [`crate::baseline`]; see that module for the evidence per row.
     #[must_use]
     pub fn supports(&self, feature: Feature) -> bool {
-        self.features.contains(&feature)
+        match self.provider {
+            Provider::Nodus => self.features.contains(&feature),
+            Provider::Mastodon => crate::baseline::mastodon_supports(feature),
+            Provider::Misskey => crate::baseline::misskey_supports(feature),
+        }
     }
 
-    /// Whether every feature in `needed` is advertised.
+    /// Whether every feature in `needed` is served.
     #[must_use]
     pub fn supports_all(&self, needed: &[Feature]) -> bool {
         needed.iter().all(|feature| self.supports(*feature))
     }
 
-    /// Reads the parts of a `/api/v1/meta` answer the SDK already decodes.
+    /// Reads a `/api/v1/meta` answer the SDK already decoded into a typed `Meta`.
     ///
-    /// The SDK talks to our API through a typed `Meta`, so it never sees the JSON
-    /// document: this is the same negotiation without a serialisation round trip.
+    /// The provider is Nodus by definition: only our API publishes this document.
     #[must_use]
     pub fn from_parts(contract: impl Into<String>, features: &[String]) -> Self {
+        let (features, unknown) = split_names(features);
         Self {
             contract: contract.into(),
-            features: features
-                .iter()
-                .filter_map(|name| Feature::parse(name))
-                .collect(),
+            provider: Provider::Nodus,
+            features,
+            unknown,
         }
     }
 
@@ -121,19 +153,43 @@ impl Capabilities {
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let features = object
+        let names: Vec<&str> = object
             .get("features")
             .and_then(serde_json::Value::as_array)
-            .map(|names| {
-                names
-                    .iter()
-                    .filter_map(serde_json::Value::as_str)
-                    .filter_map(Feature::parse)
-                    .collect()
-            })
+            .map(|names| names.iter().filter_map(serde_json::Value::as_str).collect())
             .unwrap_or_default();
-        Ok(Self { contract, features })
+        Ok(Self::from_names(contract, &names))
     }
+
+    fn from_names(contract: String, names: &[&str]) -> Self {
+        let mut features = Vec::with_capacity(names.len());
+        let mut unknown = Vec::new();
+        for name in names {
+            match Feature::parse(name) {
+                Some(feature) => features.push(feature),
+                None => unknown.push((*name).to_owned()),
+            }
+        }
+        Self {
+            contract,
+            provider: Provider::Nodus,
+            features,
+            unknown,
+        }
+    }
+}
+
+/// Splits advertised names into known features and names this build cannot name.
+fn split_names(names: &[String]) -> (Vec<Feature>, Vec<String>) {
+    let mut features = Vec::with_capacity(names.len());
+    let mut unknown = Vec::new();
+    for name in names {
+        match Feature::parse(name) {
+            Some(feature) => features.push(feature),
+            None => unknown.push(name.clone()),
+        }
+    }
+    (features, unknown)
 }
 
 /// Why a meta document could not be read.
@@ -145,50 +201,4 @@ pub enum MetaError {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_plain_mastodon_instance_answers_404_which_reads_as_no_extensions() {
-        let capabilities = Capabilities::mastodon();
-        assert!(!capabilities.supports(Feature::Batch));
-        assert!(!capabilities.supports_all(&[Feature::Events]));
-    }
-
-    #[test]
-    fn unknown_features_are_ignored_rather_than_rejected() {
-        let meta = serde_json::json!({
-            "contract": "0.2.0",
-            "features": ["batch", "telepathy", "events"]
-        });
-        let capabilities = Capabilities::from_meta(&meta).expect("meta");
-        assert_eq!(capabilities.contract, "0.2.0");
-        assert_eq!(capabilities.features, vec![Feature::Batch, Feature::Events]);
-    }
-
-    #[test]
-    fn a_meta_document_without_a_feature_list_means_no_extensions() {
-        let capabilities =
-            Capabilities::from_meta(&serde_json::json!({ "contract": "0.1.0" })).expect("meta");
-        assert_eq!(capabilities.features, vec![]);
-    }
-
-    #[test]
-    fn a_non_object_meta_document_is_an_error() {
-        let error = Capabilities::from_meta(&serde_json::json!(["batch"])).expect_err("array");
-        assert_eq!(error, MetaError::NotAnObject);
-    }
-
-    #[test]
-    fn feature_spellings_round_trip() {
-        for feature in [
-            Feature::FeedAccounts,
-            Feature::Events,
-            Feature::SyncToken,
-            Feature::Batch,
-        ] {
-            assert_eq!(Feature::parse(feature.as_str()), Some(feature));
-        }
-        assert_eq!(Feature::parse("batch_requests"), None);
-    }
-}
+mod tests;

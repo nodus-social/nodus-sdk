@@ -670,6 +670,7 @@ dependencies = [
 name = "nodus-protocol"
 version = "0.1.0"
 dependencies = [
+ "nodus-client-core",
  "nodus-shared",
  "serde",
  "serde_json",

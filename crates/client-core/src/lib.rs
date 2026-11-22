@@ -51,6 +51,21 @@ pub enum Error {
     /// The instance API does not expose this feature.
     #[error("{0} is not supported by this instance API")]
     Unsupported(&'static str),
+    /// The capability model predicted this server cannot serve `verb`, and the
+    /// server confirmed it with 404 or 501.
+    ///
+    /// Distinct from [`Error::Unsupported`], which a transport raises when it knows
+    /// its own implementation lacks an operation. This one is only produced when the
+    /// negotiated answer agrees with the failure, so it is trustworthy as a reason to
+    /// degrade; a 404 on a *supported* verb stays [`Error::Status`] because that is a
+    /// bug, not a limit. See `nodus_protocol::unsupported::capability_error`.
+    #[error("{verb} is not served: this server does not support {feature}")]
+    UnsupportedCapability {
+        /// Capability name, matching `Feature::as_str` in `nodus-protocol`.
+        feature: &'static str,
+        /// The request that failed, e.g. `GET /api/v1/favourites`.
+        verb: &'static str,
+    },
 }
 
 /// Result alias used by every operation in this crate.

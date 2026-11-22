@@ -27,15 +27,19 @@
 //! the negotiated result, `nodus-discovery` performs the calls, and the transports in
 //! `nodus-instance` stay untouched.
 
+pub mod baseline;
 pub mod batch;
 pub mod capabilities;
 pub mod events;
+pub mod feature;
 pub mod plan;
 pub mod state_sync;
+pub mod unsupported;
 
 pub use batch::{BatchCall, BatchResponse, BatchResult, Verb};
-pub use capabilities::{Capabilities, Feature};
+pub use capabilities::{Capabilities, Provider};
 pub use events::{Event, EventKind, Subscription};
+pub use feature::Feature;
 pub use plan::{Need, Plan, Surface, choose};
 pub use state_sync::{StateSyncRequest, StateSyncResponse, SyncEvent, SyncStatus};
 
