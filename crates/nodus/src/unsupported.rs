@@ -50,12 +50,12 @@ mod tests {
     #[test]
     fn a_404_on_an_unsupported_verb_is_an_unsupported_capability() {
         let mastodon = Capabilities::mastodon();
-        let error = capability_error(&mastodon, Feature::Moderation, VERB, 404)
+        let error = capability_error(&mastodon, Feature::Batch, VERB, 404)
             .expect("a predicted miss is an answer");
         assert!(matches!(
             error,
             Error::UnsupportedCapability {
-                feature: "moderation",
+                feature: "batch",
                 verb: VERB,
             }
         ));
@@ -86,7 +86,7 @@ mod tests {
         let mastodon = Capabilities::mastodon();
         for status in [400, 401, 403, 410, 429, 500, 502] {
             assert!(
-                capability_error(&mastodon, Feature::Moderation, VERB, status).is_none(),
+                capability_error(&mastodon, Feature::Batch, VERB, status).is_none(),
                 "{status} must reach the caller unchanged"
             );
         }
