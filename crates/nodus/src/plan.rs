@@ -139,13 +139,13 @@ pub fn choose(capabilities: &Capabilities, need: &Need) -> Plan {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::capabilities::Provider;
+    use crate::capabilities::{ActiveFeatures, Provider};
 
     fn with(features: &[Feature]) -> Capabilities {
         Capabilities {
             contract: "0.1.0".to_owned(),
             provider: Provider::Nodus,
-            features: features.to_vec(),
+            features: ActiveFeatures::from_slice(features),
             unknown: Vec::new(),
         }
     }

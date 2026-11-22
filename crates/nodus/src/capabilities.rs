@@ -8,10 +8,12 @@
 //! Parsing is tolerant in both directions. A name the server advertises that this
 //! build does not know is kept in [`Capabilities::unknown`] rather than dropped, so a
 //! newer server still informs an older client; a name this build knows but the server
-//! omits simply reads as unsupported.
+//! omits simply reads as unsupported. The active answer itself is an
+//! [`ActiveFeatures`] set, not strings matched at request time.
 
 use serde::{Deserialize, Serialize};
 
+pub use crate::active::ActiveFeatures;
 pub use crate::feature::Feature;
 
 /// Which protocol a server speaks, as far as capability answers go.
@@ -49,16 +51,17 @@ impl Provider {
 /// `contract` is the version of *our* wire contract (`0.1.0` today); a client that
 /// needs a newer one must say so instead of guessing from the feature list, because a
 /// feature name can be reused across a breaking change.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Capabilities {
     /// Contract version the server speaks, e.g. `0.1.0`.
     pub contract: String,
     /// The provider whose answer this is.
     #[serde(default)]
     pub provider: Provider,
-    /// Features it advertises. Only meaningful for [`Provider::Nodus`].
+    /// The typed active set. For Nodus this is built from the published names; for the
+    /// other two it is the judged baseline, so no caller has to re-derive it.
     #[serde(default)]
-    pub features: Vec<Feature>,
+    pub features: ActiveFeatures,
     /// Feature names the server advertised that this build does not know.
     ///
     /// Kept rather than dropped: a newer server may gate a surface behind a name an
@@ -66,6 +69,13 @@ pub struct Capabilities {
     /// diagnostics screen instead of silently losing it.
     #[serde(default)]
     pub unknown: Vec<String>,
+}
+
+impl Default for Capabilities {
+    /// The compatibility floor: Mastodon, with the baseline already active.
+    fn default() -> Self {
+        Self::mastodon()
+    }
 }
 
 impl Capabilities {
@@ -76,8 +86,10 @@ impl Capabilities {
     #[must_use]
     pub fn mastodon() -> Self {
         Self {
+            contract: String::new(),
             provider: Provider::Mastodon,
-            ..Self::default()
+            features: crate::baseline::active(Provider::Mastodon),
+            unknown: Vec::new(),
         }
     }
 
@@ -85,8 +97,10 @@ impl Capabilities {
     #[must_use]
     pub fn misskey() -> Self {
         Self {
+            contract: String::new(),
             provider: Provider::Misskey,
-            ..Self::default()
+            features: crate::baseline::active(Provider::Misskey),
+            unknown: Vec::new(),
         }
     }
 
@@ -108,16 +122,12 @@ impl Capabilities {
 
     /// Whether the server serves `feature`.
     ///
-    /// Nodus is answered from its published list — a feature it does not list is not
-    /// served. Mastodon and Misskey publish no list, so they are answered from the
-    /// documented baseline in [`crate::baseline`]; see that module for the evidence per row.
+    /// A bit test over the typed active set: Nodus's set came from its published list,
+    /// Mastodon's and Misskey's from [`crate::baseline`]. There is no second runtime
+    /// lookup to disagree with the negotiation answer.
     #[must_use]
     pub fn supports(&self, feature: Feature) -> bool {
-        match self.provider {
-            Provider::Nodus => self.features.contains(&feature),
-            Provider::Mastodon => crate::baseline::mastodon_supports(feature),
-            Provider::Misskey => crate::baseline::misskey_supports(feature),
-        }
+        self.features.contains(feature)
     }
 
     /// Whether every feature in `needed` is served.
@@ -126,17 +136,38 @@ impl Capabilities {
         needed.iter().all(|feature| self.supports(*feature))
     }
 
+    /// Builds a Nodus answer from the names `/api/v1/meta` published.
+    ///
+    /// The provider is Nodus by definition. A name this build cannot spell is retained
+    /// in [`Capabilities::unknown`], never dropped: a newer server must still be able
+    /// to tell an older client what it offers. The contract is empty here; use
+    /// [`Capabilities::from_parts`] when the document carried one.
+    #[must_use]
+    pub fn from_published(names: &[String]) -> Self {
+        let mut features = ActiveFeatures::NONE;
+        let mut unknown = Vec::new();
+        for name in names {
+            match Feature::parse(name) {
+                Some(feature) => features.insert(feature),
+                None => unknown.push(name.clone()),
+            }
+        }
+        Self {
+            contract: String::new(),
+            provider: Provider::Nodus,
+            features,
+            unknown,
+        }
+    }
+
     /// Reads a `/api/v1/meta` answer the SDK already decoded into a typed `Meta`.
     ///
     /// The provider is Nodus by definition: only our API publishes this document.
     #[must_use]
-    pub fn from_parts(contract: impl Into<String>, features: &[String]) -> Self {
-        let (features, unknown) = split_names(features);
+    pub fn from_parts(contract: impl Into<String>, names: &[String]) -> Self {
         Self {
             contract: contract.into(),
-            provider: Provider::Nodus,
-            features,
-            unknown,
+            ..Self::from_published(names)
         }
     }
 
@@ -153,43 +184,19 @@ impl Capabilities {
             .and_then(serde_json::Value::as_str)
             .unwrap_or_default()
             .to_owned();
-        let names: Vec<&str> = object
+        let names: Vec<String> = object
             .get("features")
             .and_then(serde_json::Value::as_array)
-            .map(|names| names.iter().filter_map(serde_json::Value::as_str).collect())
+            .map(|names| {
+                names
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
             .unwrap_or_default();
-        Ok(Self::from_names(contract, &names))
+        Ok(Self::from_parts(contract, &names))
     }
-
-    fn from_names(contract: String, names: &[&str]) -> Self {
-        let mut features = Vec::with_capacity(names.len());
-        let mut unknown = Vec::new();
-        for name in names {
-            match Feature::parse(name) {
-                Some(feature) => features.push(feature),
-                None => unknown.push((*name).to_owned()),
-            }
-        }
-        Self {
-            contract,
-            provider: Provider::Nodus,
-            features,
-            unknown,
-        }
-    }
-}
-
-/// Splits advertised names into known features and names this build cannot name.
-fn split_names(names: &[String]) -> (Vec<Feature>, Vec<String>) {
-    let mut features = Vec::with_capacity(names.len());
-    let mut unknown = Vec::new();
-    for name in names {
-        match Feature::parse(name) {
-            Some(feature) => features.push(feature),
-            None => unknown.push(name.clone()),
-        }
-    }
-    (features, unknown)
 }
 
 /// Why a meta document could not be read.

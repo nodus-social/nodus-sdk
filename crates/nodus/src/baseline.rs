@@ -65,146 +65,152 @@
 //!
 //! Everything Nodus adds beyond a protocol's own client API stays `false`.
 
+use crate::active::ActiveFeatures;
+use crate::capabilities::Provider;
 use crate::feature::Feature;
 
-/// The Mastodon baseline, probed against `v4.6.3` on 2026-11-22; see the module table
-/// for the status code behind each row.
-const MASTODON: &[(Feature, bool)] = &[
-    (Feature::Admin, true),
-    (Feature::Moderation, true),
-    (Feature::Scanners, false),
-    (Feature::Topology, false),
-    (Feature::Protocol, false),
-    (Feature::RemoteBlocks, true),
-    (Feature::Polls, true),
-    (Feature::Batch, false),
-    (Feature::Appeals, false),
-    (Feature::InstanceRules, true),
-    (Feature::ModerationRules, false),
-    (Feature::MediaQuarantine, false),
-    (Feature::BlockLists, false),
-    (Feature::ModerationStats, false),
-    (Feature::RemoteAccounts, true),
-    (Feature::Warnings, false),
-    (Feature::Escalation, false),
-    (Feature::FederationDelivery, false),
-    (Feature::DomainPauses, false),
-    (Feature::SettingsTransfer, false),
-    (Feature::ReportForwarding, false),
-    (Feature::AccountDeletion, false),
-    (Feature::Drive, false),
-    (Feature::DriveShare, false),
-    (Feature::DriveAttach, false),
-    (Feature::FeedAccounts, false),
-    (Feature::Events, false),
-    (Feature::SyncToken, false),
-    (Feature::Favourites, true),
-];
-
-/// The Misskey baseline, probed against `2026.11.0` on 2026-11-22; see the module table
-/// for the status code behind each row.
-const MISSKEY: &[(Feature, bool)] = &[
-    (Feature::Admin, true),
-    (Feature::Moderation, true),
-    (Feature::Scanners, false),
-    (Feature::Topology, false),
-    (Feature::Protocol, false),
-    (Feature::RemoteBlocks, true),
-    (Feature::Polls, true),
-    (Feature::Batch, false),
-    (Feature::Appeals, false),
-    (Feature::InstanceRules, true),
-    (Feature::ModerationRules, false),
-    (Feature::MediaQuarantine, false),
-    (Feature::BlockLists, false),
-    (Feature::ModerationStats, false),
-    (Feature::RemoteAccounts, true),
-    (Feature::Warnings, false),
-    (Feature::Escalation, false),
-    (Feature::FederationDelivery, false),
-    (Feature::DomainPauses, false),
-    (Feature::SettingsTransfer, false),
-    (Feature::ReportForwarding, true),
-    (Feature::AccountDeletion, true),
-    (Feature::Drive, true),
-    (Feature::DriveShare, true),
-    (Feature::DriveAttach, true),
-    (Feature::FeedAccounts, false),
-    (Feature::Events, false),
-    (Feature::SyncToken, false),
-    (Feature::Favourites, true),
-];
-
-/// Whether a Mastodon instance serves `feature` according to the baseline table.
-pub(crate) fn mastodon_supports(feature: Feature) -> bool {
-    MASTODON
-        .iter()
-        .find(|(named, _)| *named == feature)
-        .is_some_and(|(_, served)| *served)
+/// One feature decided for all three protocols, in `Feature::ALL` order.
+///
+/// The exhaustive `match` is the compile-time gate: a new `Feature` variant is a
+/// non-exhaustive-match error here, so it cannot reach a caller without a decision for
+/// Nodus, Mastodon and Misskey. The three bools are `[nodus, mastodon, misskey]`.
+///
+/// Nodus is `false` in every row on purpose: it publishes `/api/v1/meta`, so its answer
+/// is the published list, never a baseline guess. The flag exists so the compiler still
+/// asks about Nodus when a feature is added, even though the runtime answer ignores it.
+#[allow(clippy::match_same_arms)] // one arm per Feature keeps each decision visible
+const fn decision(feature: Feature) -> [bool; 3] {
+    match feature {
+        Feature::Admin => [false, true, true],
+        Feature::Moderation => [false, true, true],
+        Feature::Scanners => [false, false, false],
+        Feature::Topology => [false, false, false],
+        Feature::Protocol => [false, false, false],
+        Feature::RemoteBlocks => [false, true, true],
+        Feature::Polls => [false, true, true],
+        Feature::Batch => [false, false, false],
+        Feature::Appeals => [false, false, false],
+        Feature::InstanceRules => [false, true, true],
+        Feature::ModerationRules => [false, false, false],
+        Feature::MediaQuarantine => [false, false, false],
+        Feature::BlockLists => [false, false, false],
+        Feature::ModerationStats => [false, false, false],
+        Feature::RemoteAccounts => [false, true, true],
+        Feature::Warnings => [false, false, false],
+        Feature::Escalation => [false, false, false],
+        Feature::FederationDelivery => [false, false, false],
+        Feature::DomainPauses => [false, false, false],
+        Feature::SettingsTransfer => [false, false, false],
+        Feature::ReportForwarding => [false, false, true],
+        Feature::AccountDeletion => [false, false, true],
+        Feature::Drive => [false, false, true],
+        Feature::DriveShare => [false, false, true],
+        Feature::DriveAttach => [false, false, true],
+        Feature::FeedAccounts => [false, false, false],
+        Feature::Events => [false, false, false],
+        Feature::SyncToken => [false, false, false],
+        Feature::Favourites => [false, true, true],
+    }
 }
 
-/// Whether a Misskey instance serves `feature` according to the baseline table.
-pub(crate) fn misskey_supports(feature: Feature) -> bool {
-    MISSKEY
-        .iter()
-        .find(|(named, _)| *named == feature)
-        .is_some_and(|(_, served)| *served)
+/// The active set a provider serves when it publishes no capability list.
+///
+/// Nodus returns an empty set: without a published list there is nothing honest to
+/// claim, and [`crate::Capabilities::from_published`] supplies that list.
+pub(crate) const fn active(provider: Provider) -> ActiveFeatures {
+    let column = match provider {
+        Provider::Nodus => 0,
+        Provider::Mastodon => 1,
+        Provider::Misskey => 2,
+    };
+    let mut set = ActiveFeatures::NONE;
+    let mut index = 0;
+    while index < Feature::COUNT {
+        let feature = Feature::ALL[index];
+        if decision(feature)[column] {
+            set.insert(feature);
+        }
+        index += 1;
+    }
+    set
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// Every row as probed, so a future edit to a table cannot flip one silently.
-    const EXPECTED: &[(Feature, bool, bool)] = &[
-        (Feature::Admin, true, true),
-        (Feature::Moderation, true, true),
-        (Feature::Scanners, false, false),
-        (Feature::Topology, false, false),
-        (Feature::Protocol, false, false),
-        (Feature::RemoteBlocks, true, true),
-        (Feature::Polls, true, true),
-        (Feature::Batch, false, false),
-        (Feature::Appeals, false, false),
-        (Feature::InstanceRules, true, true),
-        (Feature::ModerationRules, false, false),
-        (Feature::MediaQuarantine, false, false),
-        (Feature::BlockLists, false, false),
-        (Feature::ModerationStats, false, false),
-        (Feature::RemoteAccounts, true, true),
-        (Feature::Warnings, false, false),
-        (Feature::Escalation, false, false),
-        (Feature::FederationDelivery, false, false),
-        (Feature::DomainPauses, false, false),
-        (Feature::SettingsTransfer, false, false),
-        (Feature::ReportForwarding, false, true),
-        (Feature::AccountDeletion, false, true),
-        (Feature::Drive, false, true),
-        (Feature::DriveShare, false, true),
-        (Feature::DriveAttach, false, true),
-        (Feature::FeedAccounts, false, false),
-        (Feature::Events, false, false),
-        (Feature::SyncToken, false, false),
-        (Feature::Favourites, true, true),
+    /// Every row as probed: `(feature, nodus, mastodon, misskey)`. Nodus is always
+    /// false because it has no baseline; see [`decision`].
+    const EXPECTED: &[(Feature, bool, bool, bool)] = &[
+        (Feature::Admin, false, true, true),
+        (Feature::Moderation, false, true, true),
+        (Feature::Scanners, false, false, false),
+        (Feature::Topology, false, false, false),
+        (Feature::Protocol, false, false, false),
+        (Feature::RemoteBlocks, false, true, true),
+        (Feature::Polls, false, true, true),
+        (Feature::Batch, false, false, false),
+        (Feature::Appeals, false, false, false),
+        (Feature::InstanceRules, false, true, true),
+        (Feature::ModerationRules, false, false, false),
+        (Feature::MediaQuarantine, false, false, false),
+        (Feature::BlockLists, false, false, false),
+        (Feature::ModerationStats, false, false, false),
+        (Feature::RemoteAccounts, false, true, true),
+        (Feature::Warnings, false, false, false),
+        (Feature::Escalation, false, false, false),
+        (Feature::FederationDelivery, false, false, false),
+        (Feature::DomainPauses, false, false, false),
+        (Feature::SettingsTransfer, false, false, false),
+        (Feature::ReportForwarding, false, false, true),
+        (Feature::AccountDeletion, false, false, true),
+        (Feature::Drive, false, false, true),
+        (Feature::DriveShare, false, false, true),
+        (Feature::DriveAttach, false, false, true),
+        (Feature::FeedAccounts, false, false, false),
+        (Feature::Events, false, false, false),
+        (Feature::SyncToken, false, false, false),
+        (Feature::Favourites, false, true, true),
     ];
 
     #[test]
     fn the_matrix_pins_every_row_as_probed() {
-        assert_eq!(EXPECTED.len(), Feature::ALL.len());
-        for &(feature, mastodon, misskey) in EXPECTED {
-            assert_eq!(mastodon_supports(feature), mastodon, "mastodon {feature:?}");
-            assert_eq!(misskey_supports(feature), misskey, "misskey {feature:?}");
+        assert_eq!(EXPECTED.len(), Feature::COUNT);
+        let nodus = active(Provider::Nodus);
+        let mastodon = active(Provider::Mastodon);
+        let misskey = active(Provider::Misskey);
+        for &(feature, in_nodus, in_mastodon, in_misskey) in EXPECTED {
+            assert_eq!(nodus.contains(feature), in_nodus, "nodus {feature:?}");
+            assert_eq!(
+                mastodon.contains(feature),
+                in_mastodon,
+                "mastodon {feature:?}"
+            );
+            assert_eq!(misskey.contains(feature), in_misskey, "misskey {feature:?}");
         }
     }
 
     #[test]
-    fn each_table_names_every_feature_exactly_once() {
-        for table in [MASTODON, MISSKEY] {
-            assert_eq!(table.len(), Feature::ALL.len());
-            for feature in Feature::ALL {
-                let count = table.iter().filter(|(named, _)| *named == feature).count();
-                assert_eq!(count, 1, "{feature:?} appears {count} times");
-            }
+    fn the_three_protocol_sets_are_decided_for_every_feature() {
+        let nodus = active(Provider::Nodus);
+        let mastodon = active(Provider::Mastodon);
+        let misskey = active(Provider::Misskey);
+        for feature in Feature::ALL {
+            let row = decision(feature);
+            assert_eq!(nodus.contains(feature), row[0], "nodus {feature:?}");
+            assert_eq!(mastodon.contains(feature), row[1], "mastodon {feature:?}");
+            assert_eq!(misskey.contains(feature), row[2], "misskey {feature:?}");
         }
+    }
+
+    #[test]
+    fn nodus_must_publish_because_its_baseline_is_empty() {
+        assert!(active(Provider::Nodus).is_empty());
+    }
+
+    #[test]
+    fn favourites_is_served_by_mastodon_and_misskey() {
+        assert!(active(Provider::Mastodon).contains(Feature::Favourites));
+        assert!(active(Provider::Misskey).contains(Feature::Favourites));
     }
 }

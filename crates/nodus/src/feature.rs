@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 /// build does not know is not discarded — [`Capabilities`](crate::Capabilities) keeps it
 /// in `unknown`, so a newer server still informs an older client, and an unknown local
 /// name simply parses to `None` rather than failing the whole answer.
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Feature {
@@ -78,11 +79,17 @@ pub enum Feature {
 }
 
 impl Feature {
+    /// How many capabilities this build names.
+    ///
+    /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
+    /// below turns a forgotten row into a compile error rather than a missing bit.
+    pub const COUNT: usize = 29;
+
     /// Every capability this build names.
     ///
     /// A table rather than a match in [`Feature::parse`], so adding a variant is one
     /// edit and a forgotten spelling cannot silently become "unknown".
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; Self::COUNT] = [
         Self::Admin,
         Self::Moderation,
         Self::Scanners,
@@ -113,6 +120,45 @@ impl Feature {
         Self::SyncToken,
         Self::Favourites,
     ];
+
+    /// Position in declaration order, used as the bit index in [`ActiveFeatures`].
+    ///
+    /// An exhaustive match rather than `self as usize`: a new variant must be given a
+    /// slot explicitly, and it cannot silently alias an existing feature's bit.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Admin => 0,
+            Self::Moderation => 1,
+            Self::Scanners => 2,
+            Self::Topology => 3,
+            Self::Protocol => 4,
+            Self::RemoteBlocks => 5,
+            Self::Polls => 6,
+            Self::Batch => 7,
+            Self::Appeals => 8,
+            Self::InstanceRules => 9,
+            Self::ModerationRules => 10,
+            Self::MediaQuarantine => 11,
+            Self::BlockLists => 12,
+            Self::ModerationStats => 13,
+            Self::RemoteAccounts => 14,
+            Self::Warnings => 15,
+            Self::Escalation => 16,
+            Self::FederationDelivery => 17,
+            Self::DomainPauses => 18,
+            Self::SettingsTransfer => 19,
+            Self::ReportForwarding => 20,
+            Self::AccountDeletion => 21,
+            Self::Drive => 22,
+            Self::DriveShare => 23,
+            Self::DriveAttach => 24,
+            Self::FeedAccounts => 25,
+            Self::Events => 26,
+            Self::SyncToken => 27,
+            Self::Favourites => 28,
+        }
+    }
 
     /// The wire spelling, which is also what the server advertises.
     #[must_use]
@@ -159,56 +205,7 @@ impl Feature {
     }
 }
 
+const _: () = assert!(Feature::COUNT == Feature::ALL.len());
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_feature_spelling_round_trips() {
-        for feature in Feature::ALL {
-            assert_eq!(Feature::parse(feature.as_str()), Some(feature));
-        }
-    }
-
-    #[test]
-    fn an_unknown_spelling_is_not_a_feature_rather_than_an_error() {
-        assert_eq!(Feature::parse("telepathy"), None);
-    }
-
-    #[test]
-    fn the_names_nodus_publishes_all_parse() {
-        let published = [
-            "admin",
-            "moderation",
-            "scanners",
-            "topology",
-            "protocol",
-            "remote_blocks",
-            "polls",
-            "batch",
-            "appeals",
-            "instance_rules",
-            "moderation_rules",
-            "media_quarantine",
-            "block_lists",
-            "moderation_stats",
-            "remote_accounts",
-            "warnings",
-            "escalation",
-            "federation_delivery",
-            "domain_pauses",
-            "settings_transfer",
-            "report_forwarding",
-            "account_deletion",
-            "drive",
-            "drive_share",
-            "drive_attach",
-            "feed_accounts",
-            "events",
-            "sync_token",
-        ];
-        for name in published {
-            assert!(Feature::parse(name).is_some(), "{name} did not parse");
-        }
-    }
-}
+mod tests;
