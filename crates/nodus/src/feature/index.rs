@@ -82,6 +82,7 @@ impl Feature {
             Self::Exports => 67,
             Self::FeaturedTags => 68,
             Self::NotificationSettings => 69,
+            Self::Pages => 70,
         }
     }
 }

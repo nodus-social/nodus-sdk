@@ -8,7 +8,7 @@
 //!
 //! `moderation_rules` is not a new spelling: it is the existing `Feature::ModerationRules`
 //! row above, whose bit is unchanged, and it is the moderation-patterns section of the
-//! vocabulary. The published list therefore names 70 capabilities, not 71.
+//! vocabulary. The published list therefore names 71 capabilities, not 72.
 //!
 //! | Feature | Mastodon 4.6.3 | Misskey 2026.11.0 |
 //! |---|---|---|
@@ -82,6 +82,7 @@
 //! | `exports` | yes — DECLARED: `/settings/export` and the CSV `/settings/exports/{follows,blocks,mutes,lists,domain_blocks,bookmarks,custom_filters}` routes are in `routes/settings.rb` (302 to sign-in); no client API | yes — `400 POST /api/i/export-notes`, plus `i/export-following`, `-blocking`, `-mute`, `-favorites`, `-user-lists`, `-antennas`, `-clips` |
 //! | `featured_tags` | yes — `404 GET /api/v1/accounts/1/featured_tags` with `{"error":"Record not found"}`, so the route ran and only the account was absent; Nodus publishes the name for `GET|POST /api/v1/featured_tags` and `/suggestions` | no — `POST /api/endpoints` lists no featured-tag route; profile tags are not a Misskey object |
 //! | `notification_settings` | yes — `401 GET /api/v1/notifications/policy`, the route is in `routes/api.rb` and only auth is missing | no — `POST /api/endpoints` lists no notification-policy route; Misskey keeps client notification settings in `i/registry`, not on the server |
+//! | `pages` | no — no page-shaped read: a profile costs `account` + `account_statuses`, a thread costs `status` + `context` | no — `users/notes` and `notes/conversation` exist, but no combined profile/thread payload |
 
 use crate::feature::Feature;
 
@@ -167,5 +168,11 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         Feature::Exports => [false, true, true],
         Feature::FeaturedTags => [false, true, false],
         Feature::NotificationSettings => [false, true, false],
+        // Nodus publishes `pages`, so its answer comes from the published list, never
+        // this baseline. Mastodon has no page-shaped read (a profile costs `account` +
+        // `account_statuses`; a thread costs `status` + `context`), and Misskey has
+        // `users/notes` + `notes/conversation` but no combined payload. If either gains
+        // one, this arm changes with it.
+        Feature::Pages => [false, false, false],
     }
 }

@@ -15,17 +15,30 @@ fn a_plain_mastodon_instance_serves_its_baseline_but_no_extensions() {
 fn unknown_server_features_are_retained_rather_than_rejected() {
     let meta = serde_json::json!({
         "contract": "0.2.0",
-        "features": ["batch", "telepathy", "events"]
+        "features": ["batch", "telepathy", "events", "pages"]
     });
     let capabilities = Capabilities::from_meta(&meta).expect("meta");
     assert_eq!(capabilities.contract, "0.2.0");
     assert_eq!(
         capabilities.features.iter().collect::<Vec<_>>(),
-        vec![Feature::Batch, Feature::Events]
+        vec![Feature::Batch, Feature::Events, Feature::Pages]
     );
     assert_eq!(capabilities.unknown, vec!["telepathy".to_owned()]);
     assert!(capabilities.supports(Feature::Batch));
+    assert!(capabilities.supports(Feature::Pages));
     assert!(!capabilities.supports(Feature::SyncToken));
+}
+
+#[test]
+fn pages_parses_from_the_published_list_into_its_variant() {
+    let capabilities = Capabilities::from_published(&["pages".to_owned()]);
+    assert_eq!(capabilities.provider, Provider::Nodus);
+    assert!(capabilities.supports(Feature::Pages));
+    assert_eq!(
+        capabilities.features.iter().collect::<Vec<_>>(),
+        vec![Feature::Pages]
+    );
+    assert_eq!(capabilities.unknown, Vec::<String>::new());
 }
 
 #[test]
@@ -151,9 +164,9 @@ fn a_nodus_payload_with_every_name_leaves_nothing_unknown() {
         .iter()
         .map(|feature| feature.as_str().to_owned())
         .collect();
-    assert_eq!(names.len(), 70);
+    assert_eq!(names.len(), 71);
     let capabilities = Capabilities::from_published(&names);
-    assert_eq!(capabilities.features.len(), 70);
+    assert_eq!(capabilities.features.len(), 71);
     assert_eq!(capabilities.unknown, Vec::<String>::new());
     assert_eq!(
         capabilities.features,

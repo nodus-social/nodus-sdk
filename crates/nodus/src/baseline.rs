@@ -152,6 +152,7 @@ mod tests {
         (Feature::Exports, false, true, true),
         (Feature::FeaturedTags, false, true, false),
         (Feature::NotificationSettings, false, true, false),
+        (Feature::Pages, false, false, false),
     ];
 
     #[test]

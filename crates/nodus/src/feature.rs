@@ -158,6 +158,9 @@ pub enum Feature {
     FeaturedTags,
     /// Which notifications an account wants (`/api/v1/notifications/policy`).
     NotificationSettings,
+    /// A page-shaped read of a profile or thread in one payload
+    /// (`GET /api/v1/pages/profile/:id`, `GET /api/v1/pages/status/:id` on Nodus).
+    Pages,
 }
 
 impl Feature {
@@ -165,7 +168,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 70;
+    pub const COUNT: usize = 71;
 
     /// Every capability this build names.
     ///
@@ -242,6 +245,7 @@ impl Feature {
         Self::Exports,
         Self::FeaturedTags,
         Self::NotificationSettings,
+        Self::Pages,
     ];
 }
 

@@ -77,6 +77,7 @@ impl Feature {
             Self::Exports => "exports",
             Self::FeaturedTags => "featured_tags",
             Self::NotificationSettings => "notification_settings",
+            Self::Pages => "pages",
         }
     }
 
