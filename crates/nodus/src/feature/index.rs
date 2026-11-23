@@ -74,6 +74,12 @@ impl Feature {
             Self::ModerationMedia => 59,
             Self::ModerationRegistrations => 60,
             Self::ModerationReports => 61,
+            Self::Mutes => 62,
+            Self::Blocks => 63,
+            Self::DomainBlocks => 64,
+            Self::Sessions => 65,
+            Self::TwoFactor => 66,
+            Self::Exports => 67,
         }
     }
 }

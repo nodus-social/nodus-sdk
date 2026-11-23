@@ -38,7 +38,7 @@ fn indices_are_the_declaration_order_and_unique() {
 
 #[test]
 fn the_names_nodus_publishes_all_parse() {
-    // `nodus-backend/crates/api/src/meta.rs` publishes exactly these 62 names.
+    // `nodus-backend/crates/api/src/meta.rs` publishes exactly these 68 names.
     let published = [
         "feed_accounts",
         "events",
@@ -102,6 +102,12 @@ fn the_names_nodus_publishes_all_parse() {
         "moderation_media",
         "moderation_registrations",
         "moderation_reports",
+        "mutes",
+        "blocks",
+        "domain_blocks",
+        "sessions",
+        "two_factor",
+        "exports",
     ];
     assert_eq!(published.len(), Feature::COUNT);
     for name in published {
@@ -178,6 +184,12 @@ fn the_vocabulary_covers_the_published_list_exactly() {
         "moderation_media",
         "moderation_registrations",
         "moderation_reports",
+        "mutes",
+        "blocks",
+        "domain_blocks",
+        "sessions",
+        "two_factor",
+        "exports",
     ];
     ours.sort_unstable();
     backend.sort_unstable();

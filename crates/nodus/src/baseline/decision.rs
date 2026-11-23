@@ -8,7 +8,7 @@
 //!
 //! `moderation_rules` is not a new spelling: it is the existing `Feature::ModerationRules`
 //! row above, whose bit is unchanged, and it is the moderation-patterns section of the
-//! vocabulary. The published list therefore names 62 capabilities, not 63.
+//! vocabulary. The published list therefore names 68 capabilities, not 69.
 //!
 //! | Feature | Mastodon 4.6.3 | Misskey 2026.11.0 |
 //! |---|---|---|
@@ -74,6 +74,12 @@
 //! | `moderation_media` | no — no quarantine queue | no — `admin/drive/files` is storage management, not quarantine |
 //! | `moderation_registrations` | yes — `403 GET /api/v2/admin/accounts` (pending registrations) | yes — `200 POST /api/admin/invite/list` |
 //! | `moderation_reports` | yes — `403 GET /api/v1/admin/reports` | yes — `200 POST /api/admin/abuse-user-reports` |
+//! | `mutes` | yes — `401 GET /api/v1/mutes` (user-scoped, `routes/api.rb`) | yes — `401 POST /api/mute/list` |
+//! | `blocks` | yes — `401 GET /api/v1/blocks` (user-scoped, `routes/api.rb`) | yes — `401 POST /api/blocking/list` |
+//! | `domain_blocks` | yes — `401 GET /api/v1/domain_blocks`, the account's own list; `/api/v1/instance/domain_blocks` is the public instance list, not this | yes — `400 POST /api/i/update` `mutedInstances`: muting an instance is the personal list (settings → mute-block → instance-mute) |
+//! | `sessions` | yes — DECLARED: `/auth/edit` (`registrations#edit`) renders the session list (`views/auth/registrations/_sessions.html.haml`) and `DELETE /settings/sessions/:id` is in `routes/settings.rb`; there is no client API | no — `404 POST /api/i/sessions`; `i/signin-history` is a read-only login log and `i/revoke-token` revokes an app token, neither lists nor revokes a session |
+//! | `two_factor` | yes — DECLARED: `/settings/two_factor_authentication_methods` is in `routes/settings.rb` (302 to sign-in), as are the `two_factor_authentication` enrolment routes; no client API | yes — `400 POST /api/i/2fa/register` (plus `i/2fa/done`, `-remove-key`, `-register-key`) |
+//! | `exports` | yes — DECLARED: `/settings/export` and the CSV `/settings/exports/{follows,blocks,mutes,lists,domain_blocks,bookmarks,custom_filters}` routes are in `routes/settings.rb` (302 to sign-in); no client API | yes — `400 POST /api/i/export-notes`, plus `i/export-following`, `-blocking`, `-mute`, `-favorites`, `-user-lists`, `-antennas`, `-clips` |
 
 use crate::feature::Feature;
 
@@ -151,5 +157,11 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         Feature::ModerationMedia => [false, false, false],
         Feature::ModerationRegistrations => [false, true, true],
         Feature::ModerationReports => [false, true, true],
+        Feature::Mutes => [false, true, true],
+        Feature::Blocks => [false, true, true],
+        Feature::DomainBlocks => [false, true, true],
+        Feature::Sessions => [false, true, false],
+        Feature::TwoFactor => [false, true, true],
+        Feature::Exports => [false, true, true],
     }
 }

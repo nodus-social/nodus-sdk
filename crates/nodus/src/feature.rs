@@ -142,6 +142,18 @@ pub enum Feature {
     ModerationRegistrations,
     /// Moderation: the report queue.
     ModerationReports,
+    /// The accounts this account mutes (`GET /api/v1/mutes`).
+    Mutes,
+    /// The accounts this account blocks (`GET /api/v1/blocks`).
+    Blocks,
+    /// Domains this account mutes or blocks (`/api/v1/domain_blocks`).
+    DomainBlocks,
+    /// Signed-in sessions this account can review and revoke.
+    Sessions,
+    /// Two-factor authentication enrolment, keys and recovery codes.
+    TwoFactor,
+    /// Downloading the account's own data (`/settings/export`, `i/export-*`).
+    Exports,
 }
 
 impl Feature {
@@ -149,7 +161,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 62;
+    pub const COUNT: usize = 68;
 
     /// Every capability this build names.
     ///
@@ -218,6 +230,12 @@ impl Feature {
         Self::ModerationMedia,
         Self::ModerationRegistrations,
         Self::ModerationReports,
+        Self::Mutes,
+        Self::Blocks,
+        Self::DomainBlocks,
+        Self::Sessions,
+        Self::TwoFactor,
+        Self::Exports,
     ];
 }
 

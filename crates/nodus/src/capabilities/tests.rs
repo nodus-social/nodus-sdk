@@ -146,18 +146,45 @@ fn the_published_admin_and_moderation_pages_map_to_their_variants() {
 }
 
 #[test]
-fn a_nodus_payload_with_all_sixty_two_names_leaves_nothing_unknown() {
+fn a_nodus_payload_with_all_sixty_eight_names_leaves_nothing_unknown() {
     let names: Vec<String> = crate::Feature::ALL
         .iter()
         .map(|feature| feature.as_str().to_owned())
         .collect();
-    assert_eq!(names.len(), 62);
+    assert_eq!(names.len(), 68);
     let capabilities = Capabilities::from_published(&names);
-    assert_eq!(capabilities.features.len(), 62);
+    assert_eq!(capabilities.features.len(), 68);
     assert_eq!(capabilities.unknown, Vec::<String>::new());
     assert_eq!(
         capabilities.features,
         crate::ActiveFeatures::ALL,
         "every published name must map to its variant"
     );
+}
+
+#[test]
+fn the_settings_surface_names_map_to_their_variants() {
+    let names = [
+        "mutes",
+        "blocks",
+        "domain_blocks",
+        "sessions",
+        "two_factor",
+        "exports",
+        "telepathy",
+    ];
+    let owned: Vec<String> = names.iter().map(|name| (*name).to_owned()).collect();
+    let capabilities = Capabilities::from_published(&owned);
+    assert_eq!(
+        capabilities.features.iter().collect::<Vec<_>>(),
+        vec![
+            Feature::Mutes,
+            Feature::Blocks,
+            Feature::DomainBlocks,
+            Feature::Sessions,
+            Feature::TwoFactor,
+            Feature::Exports,
+        ]
+    );
+    assert_eq!(capabilities.unknown, vec!["telepathy".to_owned()]);
 }

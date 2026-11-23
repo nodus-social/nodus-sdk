@@ -69,6 +69,12 @@ impl Feature {
             Self::ModerationMedia => "moderation_media",
             Self::ModerationRegistrations => "moderation_registrations",
             Self::ModerationReports => "moderation_reports",
+            Self::Mutes => "mutes",
+            Self::Blocks => "blocks",
+            Self::DomainBlocks => "domain_blocks",
+            Self::Sessions => "sessions",
+            Self::TwoFactor => "two_factor",
+            Self::Exports => "exports",
         }
     }
 

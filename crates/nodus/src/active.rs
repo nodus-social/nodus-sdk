@@ -12,12 +12,12 @@ use crate::feature::Feature;
 
 /// The set of [`Feature`]s a server serves, in declaration order.
 ///
-/// One machine word because the protocol names fewer than 64 features; the assertion
-/// below keeps that promise honest instead of letting a 65th variant shift silently.
+/// One machine word because the protocol names fewer than 128 features; the assertion
+/// below keeps that promise honest instead of letting a 129th variant shift silently.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ActiveFeatures(u64);
+pub struct ActiveFeatures(u128);
 
-const _: () = assert!(Feature::COUNT <= u64::BITS as usize);
+const _: () = assert!(Feature::COUNT <= u128::BITS as usize);
 
 impl ActiveFeatures {
     /// No capability at all.
@@ -68,7 +68,7 @@ impl ActiveFeatures {
         self.0.count_ones() as usize
     }
 
-    const fn bit(feature: Feature) -> u64 {
+    const fn bit(feature: Feature) -> u128 {
         1 << feature.index()
     }
 }

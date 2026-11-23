@@ -144,6 +144,12 @@ mod tests {
         (Feature::ModerationMedia, false, false, false),
         (Feature::ModerationRegistrations, false, true, true),
         (Feature::ModerationReports, false, true, true),
+        (Feature::Mutes, false, true, true),
+        (Feature::Blocks, false, true, true),
+        (Feature::DomainBlocks, false, true, true),
+        (Feature::Sessions, false, true, false),
+        (Feature::TwoFactor, false, true, true),
+        (Feature::Exports, false, true, true),
     ];
 
     #[test]
