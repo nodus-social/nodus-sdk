@@ -75,6 +75,8 @@ impl Feature {
             Self::Sessions => "sessions",
             Self::TwoFactor => "two_factor",
             Self::Exports => "exports",
+            Self::FeaturedTags => "featured_tags",
+            Self::NotificationSettings => "notification_settings",
         }
     }
 

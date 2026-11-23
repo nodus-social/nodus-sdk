@@ -146,14 +146,14 @@ fn the_published_admin_and_moderation_pages_map_to_their_variants() {
 }
 
 #[test]
-fn a_nodus_payload_with_all_sixty_eight_names_leaves_nothing_unknown() {
+fn a_nodus_payload_with_every_name_leaves_nothing_unknown() {
     let names: Vec<String> = crate::Feature::ALL
         .iter()
         .map(|feature| feature.as_str().to_owned())
         .collect();
-    assert_eq!(names.len(), 68);
+    assert_eq!(names.len(), 70);
     let capabilities = Capabilities::from_published(&names);
-    assert_eq!(capabilities.features.len(), 68);
+    assert_eq!(capabilities.features.len(), 70);
     assert_eq!(capabilities.unknown, Vec::<String>::new());
     assert_eq!(
         capabilities.features,

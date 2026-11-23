@@ -8,7 +8,7 @@
 //!
 //! `moderation_rules` is not a new spelling: it is the existing `Feature::ModerationRules`
 //! row above, whose bit is unchanged, and it is the moderation-patterns section of the
-//! vocabulary. The published list therefore names 68 capabilities, not 69.
+//! vocabulary. The published list therefore names 70 capabilities, not 71.
 //!
 //! | Feature | Mastodon 4.6.3 | Misskey 2026.11.0 |
 //! |---|---|---|
@@ -80,6 +80,8 @@
 //! | `sessions` | yes — DECLARED: `/auth/edit` (`registrations#edit`) renders the session list (`views/auth/registrations/_sessions.html.haml`) and `DELETE /settings/sessions/:id` is in `routes/settings.rb`; there is no client API | no — `404 POST /api/i/sessions`; `i/signin-history` is a read-only login log and `i/revoke-token` revokes an app token, neither lists nor revokes a session |
 //! | `two_factor` | yes — DECLARED: `/settings/two_factor_authentication_methods` is in `routes/settings.rb` (302 to sign-in), as are the `two_factor_authentication` enrolment routes; no client API | yes — `400 POST /api/i/2fa/register` (plus `i/2fa/done`, `-remove-key`, `-register-key`) |
 //! | `exports` | yes — DECLARED: `/settings/export` and the CSV `/settings/exports/{follows,blocks,mutes,lists,domain_blocks,bookmarks,custom_filters}` routes are in `routes/settings.rb` (302 to sign-in); no client API | yes — `400 POST /api/i/export-notes`, plus `i/export-following`, `-blocking`, `-mute`, `-favorites`, `-user-lists`, `-antennas`, `-clips` |
+//! | `featured_tags` | yes — `404 GET /api/v1/accounts/1/featured_tags` with `{"error":"Record not found"}`, so the route ran and only the account was absent; Nodus publishes the name for `GET|POST /api/v1/featured_tags` and `/suggestions` | no — `POST /api/endpoints` lists no featured-tag route; profile tags are not a Misskey object |
+//! | `notification_settings` | yes — `401 GET /api/v1/notifications/policy`, the route is in `routes/api.rb` and only auth is missing | no — `POST /api/endpoints` lists no notification-policy route; Misskey keeps client notification settings in `i/registry`, not on the server |
 
 use crate::feature::Feature;
 
@@ -163,5 +165,7 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         Feature::Sessions => [false, true, false],
         Feature::TwoFactor => [false, true, true],
         Feature::Exports => [false, true, true],
+        Feature::FeaturedTags => [false, true, false],
+        Feature::NotificationSettings => [false, true, false],
     }
 }

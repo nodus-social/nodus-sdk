@@ -80,6 +80,8 @@ impl Feature {
             Self::Sessions => 65,
             Self::TwoFactor => 66,
             Self::Exports => 67,
+            Self::FeaturedTags => 68,
+            Self::NotificationSettings => 69,
         }
     }
 }

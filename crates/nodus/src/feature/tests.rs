@@ -37,8 +37,11 @@ fn indices_are_the_declaration_order_and_unique() {
 }
 
 #[test]
-fn the_names_nodus_publishes_all_parse() {
-    // `nodus-backend/crates/api/src/meta.rs` publishes exactly these 68 names.
+fn every_name_in_the_vocabulary_parses() {
+    // The vocabulary this build carries. `featured_tags` is published by
+    // `nodus-backend/crates/api/src/meta.rs`; `notification_settings`, `sessions`,
+    // `two_factor` and `exports` are named ahead of a backend route group, which is
+    // why the baseline records them without a Nodus answer.
     let published = [
         "feed_accounts",
         "events",
@@ -108,6 +111,8 @@ fn the_names_nodus_publishes_all_parse() {
         "sessions",
         "two_factor",
         "exports",
+        "featured_tags",
+        "notification_settings",
     ];
     assert_eq!(published.len(), Feature::COUNT);
     for name in published {
@@ -116,7 +121,7 @@ fn the_names_nodus_publishes_all_parse() {
 }
 
 #[test]
-fn the_vocabulary_covers_the_published_list_exactly() {
+fn the_vocabulary_is_exactly_the_named_list() {
     let mut ours: Vec<&str> = Feature::ALL
         .iter()
         .map(|feature| feature.as_str())
@@ -190,6 +195,8 @@ fn the_vocabulary_covers_the_published_list_exactly() {
         "sessions",
         "two_factor",
         "exports",
+        "featured_tags",
+        "notification_settings",
     ];
     ours.sort_unstable();
     backend.sort_unstable();

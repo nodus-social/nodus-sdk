@@ -150,6 +150,8 @@ mod tests {
         (Feature::Sessions, false, true, false),
         (Feature::TwoFactor, false, true, true),
         (Feature::Exports, false, true, true),
+        (Feature::FeaturedTags, false, true, false),
+        (Feature::NotificationSettings, false, true, false),
     ];
 
     #[test]

@@ -154,6 +154,10 @@ pub enum Feature {
     TwoFactor,
     /// Downloading the account's own data (`/settings/export`, `i/export-*`).
     Exports,
+    /// Tags an account features on its profile (`/api/v1/featured_tags`).
+    FeaturedTags,
+    /// Which notifications an account wants (`/api/v1/notifications/policy`).
+    NotificationSettings,
 }
 
 impl Feature {
@@ -161,7 +165,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 68;
+    pub const COUNT: usize = 70;
 
     /// Every capability this build names.
     ///
@@ -236,6 +240,8 @@ impl Feature {
         Self::Sessions,
         Self::TwoFactor,
         Self::Exports,
+        Self::FeaturedTags,
+        Self::NotificationSettings,
     ];
 }
 
