@@ -51,6 +51,9 @@ pub enum Error {
     /// The instance API does not expose this feature.
     #[error("{0} is not supported by this instance API")]
     Unsupported(&'static str),
+    /// The server refused a preferences write, naming the key and allowed values.
+    #[error("preference update refused: {0}")]
+    PreferenceRefused(PreferenceRefusal),
     /// The capability model predicted this server cannot serve `verb`, and the
     /// server confirmed it with 404 or 501.
     ///

@@ -22,7 +22,7 @@ use core::fmt;
 use nodus_client_core::model::{
     Account, Announcement, Context, Conversation, CredentialAccount, Draft, FeaturedTag, Filter,
     List, LocalId, MarkerTimeline, Markers, Notification, Page, PageParams, Preferences,
-    Relationship, SearchResults, Status, StreamKind, Tag,
+    PreferencesPatch, Relationship, SearchResults, Status, StreamKind, Tag,
 };
 use nodus_client_core::rest::{HttpRequest, HttpResponse, Method, Transport};
 use nodus_client_core::{Error, Instance, Result};
@@ -564,6 +564,33 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
     }
 }
 
+impl<T: Transport> nodus_client_core::actions::SettingsActions for MisskeyInstance<T> {
+    type Error = Error;
+
+    async fn preferences(&self) -> Result<Preferences> {
+        <Self as nodus_client_core::InstanceApi>::preferences(self).await
+    }
+
+    fn update_preferences(
+        &self,
+        _patch: &PreferencesPatch,
+    ) -> impl core::future::Future<Output = Result<Preferences>> {
+        // `i/registry` is per-app client storage, not a server-side set of posting
+        // defaults, so there is no endpoint to write to.
+        core::future::ready(Err(Error::Unsupported(
+            "writing preferences: Misskey keeps per-account settings in client-side i/registry storage, with no server-side preferences endpoint",
+        )))
+    }
+
+    async fn announcements(&self) -> Result<Vec<Announcement>> {
+        <Self as nodus_client_core::InstanceApi>::announcements(self).await
+    }
+
+    fn dismiss_announcement(&self, _id: &str) -> impl core::future::Future<Output = Result<()>> {
+        core::future::ready(Err(Error::Unsupported("dismissing Misskey announcements")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::cell::RefCell;
@@ -789,5 +816,26 @@ mod tests {
             block_on(client.account_statuses(&LocalId("u0".to_owned()), PageParams::first(5)))
                 .expect("account_statuses");
         assert_eq!(short_statuses.next_max_id, None);
+    }
+
+    #[test]
+    fn preferences_reads_and_writes_are_unsupported_without_a_request() {
+        let (client, requests) = instance_with(Vec::new());
+
+        let read = block_on(InstanceApi::preferences(&client)).expect_err("Misskey has no read");
+        assert!(matches!(read, Error::Unsupported(reason) if reason.contains("preferences")));
+
+        let error = block_on(
+            nodus_client_core::actions::SettingsActions::update_preferences(
+                &client,
+                &PreferencesPatch::default(),
+            ),
+        )
+        .expect_err("Misskey has no write");
+        assert!(matches!(
+            error,
+            Error::Unsupported(reason) if reason.contains("i/registry")
+        ));
+        assert!(requests.borrow().is_empty());
     }
 }

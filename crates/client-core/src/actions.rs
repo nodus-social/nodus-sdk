@@ -27,10 +27,10 @@ use crate::model::{
     DomainImportOutcome, DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft,
     FilterV1, FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language, List, LocalId,
     MarkerTimeline, MarkerUpdate, Markers, MediaAttachment, ModerationAction, NewScanner, NodeLog,
-    Page, PageParams, Poll, Preferences, Relationship, Report, ReportDraft, ReportFilter,
-    ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner, ScannerAsset,
-    ScannerRule, ScheduledStatus, SearchResults, Status, Suggestion, Tag, Topology, TrendingLink,
-    TriggerOutcome, WarningPreset,
+    Page, PageParams, Poll, Preferences, PreferencesPatch, Relationship, Report, ReportDraft,
+    ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner,
+    ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Suggestion, Tag, Topology,
+    TrendingLink, TriggerOutcome, WarningPreset,
 };
 
 /// Things done to a status.
@@ -789,7 +789,22 @@ pub trait SettingsActions {
     type Error: Debug;
 
     /// The account's posting and reading defaults.
+    ///
+    /// The shell gates this read behind `Feature::Preferences`; the transport itself has
+    /// no capability handle, so it cannot check that here.
     fn preferences(&self) -> impl Future<Output = Result<Preferences, Self::Error>>;
+
+    /// Writes only the keys in `patch` and returns the whole preferences map.
+    ///
+    /// The request is a partial `PUT`: build the patch with
+    /// [`PreferencesPatch::between`] so a value another client changed after the read
+    /// is preserved. A refused key or value is [`crate::Error::PreferenceRefused`] on the
+    /// REST transport; Misskey answers [`crate::Error::Unsupported`] because it stores
+    /// per-account settings in client-side `i/registry` storage, not on the server.
+    fn update_preferences(
+        &self,
+        patch: &PreferencesPatch,
+    ) -> impl Future<Output = Result<Preferences, Self::Error>>;
 
     /// Announcements the instance is showing.
     fn announcements(&self) -> impl Future<Output = Result<Vec<Announcement>, Self::Error>>;

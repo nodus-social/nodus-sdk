@@ -1,48 +1,9 @@
-//! Account preferences and instance announcements.
+//! Instance announcements.
 //!
-//! Preferences are what the *account* asked for, and the composer reads them so a reader
-//! who always posts unlisted does not have to say so every time. Announcements are what
-//! the *instance* wants said, which is why they are dismissible per account.
+//! Announcements are what the *instance* wants said, which is why they are dismissible
+//! per account. Account preferences live in their own module.
 
 use serde::{Deserialize, Serialize};
-
-use super::Visibility;
-
-/// The account's own defaults.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Preferences {
-    /// What the composer should start with.
-    #[serde(default)]
-    pub posting_default_visibility: Option<String>,
-    /// Whether new posts start sensitive.
-    #[serde(default)]
-    pub posting_default_sensitive: bool,
-    /// The language the composer should preselect.
-    #[serde(default)]
-    pub posting_default_language: Option<String>,
-    /// Whether media is expanded rather than collapsed.
-    #[serde(default)]
-    pub reading_expand_media: String,
-    /// Whether content warnings start open.
-    #[serde(default)]
-    pub reading_expand_spoilers: bool,
-}
-
-impl Preferences {
-    /// The visibility a new post should start with.
-    ///
-    /// Defaults to public when the account has not said otherwise, which is what every
-    /// other client does; guessing anything else would publish a post to fewer people
-    /// than the author expected.
-    pub fn visibility(&self) -> Visibility {
-        match self.posting_default_visibility.as_deref() {
-            Some("unlisted") => Visibility::Unlisted,
-            Some("private") => Visibility::Private,
-            Some("direct") => Visibility::Direct,
-            _ => Visibility::Public,
-        }
-    }
-}
 
 /// One message from the instance.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -80,21 +41,6 @@ impl Announcement {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn an_unknown_default_visibility_falls_back_to_public() {
-        let preferences = Preferences {
-            posting_default_visibility: Some("private".into()),
-            ..Preferences::default()
-        };
-        assert_eq!(preferences.visibility(), Visibility::Private);
-
-        let unknown = Preferences {
-            posting_default_visibility: Some("whatever".into()),
-            ..Preferences::default()
-        };
-        assert_eq!(unknown.visibility(), Visibility::Public);
-    }
 
     #[test]
     fn a_read_announcement_is_not_shown_again() {

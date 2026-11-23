@@ -13,6 +13,7 @@ mod highlights;
 mod instance;
 mod interaction;
 mod markers;
+mod preferences;
 mod schedule;
 mod settings;
 mod stream;
@@ -42,8 +43,12 @@ pub use interaction::{
     ProfileField, ProfileImage, ProfileUpdate, SearchResults, Tag, TagHistory,
 };
 pub use markers::{Marker, MarkerTimeline, MarkerUpdate, Markers};
+pub use preferences::{
+    ExpandMedia, PreferenceRefusal, Preferences, PreferencesPatch, QuotePolicy,
+    UnknownPreferenceValue,
+};
 pub use schedule::{ScheduledParams, ScheduledStatus};
-pub use settings::{Announcement, Preferences};
+pub use settings::Announcement;
 pub use stream::StreamEvent;
 
 use serde::{Deserialize, Serialize};

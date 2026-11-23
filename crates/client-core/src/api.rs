@@ -151,6 +151,9 @@ pub trait InstanceApi {
     ) -> impl Future<Output = Result<Page<Account>, Self::Error>>;
 
     /// The signed-in account's posting and reading defaults.
+    ///
+    /// The shell gates this behind `Feature::Preferences`; this trait has no capability
+    /// handle, so the transport itself cannot enforce that here.
     fn preferences(&self) -> impl Future<Output = Result<Preferences, Self::Error>>;
 
     /// The filters this account keeps.

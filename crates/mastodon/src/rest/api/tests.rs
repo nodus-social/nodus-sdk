@@ -11,7 +11,8 @@ use crate::actions::{
 use crate::api::InstanceApi;
 use crate::model::{
     Draft, FilterAction, FilterContext, FilterDraft, FilterV1Draft, LocalId, MarkerTimeline,
-    MarkerUpdate, PollDraft, ProfileField, ProfileImage, ProfileUpdate, Visibility,
+    MarkerUpdate, PollDraft, PreferenceRefusal, Preferences, PreferencesPatch, ProfileField,
+    ProfileImage, ProfileUpdate, Visibility,
 };
 use crate::rest::{HttpRequest, HttpResponse, RestInstance, Transport};
 use crate::{Error, Instance, Result};
@@ -755,4 +756,80 @@ fn parity_endpoints_map_a_rejected_write_to_the_server_message() {
     ));
     assert!(rejected(block_on(instance.suggestions(5)).map(|_| ())));
     assert!(rejected(block_on(instance.trending_links(3)).map(|_| ())));
+}
+
+const PREFERENCES_JSON: &str = r#"{"posting:default:visibility":"public","posting:default:sensitive":true,"posting:default:language":null,"posting:default:quote_policy":"public","reading:expand:media":"default","reading:expand:spoilers":false,"reading:autoplay:gifs":false,"notification:email":true,"notification:report":true}"#;
+
+#[test]
+fn update_preferences_puts_only_the_changed_keys_and_decodes_the_whole_map() {
+    let (instance, requests) = instance_with(vec![ok_json(PREFERENCES_JSON)]);
+    let current = Preferences::default();
+    let mut desired = current.clone();
+    desired.posting_default_sensitive = true;
+    let patch = PreferencesPatch::between(&current, &desired);
+
+    let preferences = block_on(SettingsActions::update_preferences(&instance, &patch))
+        .expect("update_preferences");
+    assert!(preferences.posting_default_sensitive);
+    assert_eq!(preferences.posting_default_visibility, Visibility::Public);
+
+    let recorded = requests.borrow();
+    assert_eq!(recorded.len(), 1);
+    assert_eq!(recorded[0].method, "PUT");
+    assert_eq!(
+        recorded[0].url,
+        "https://mastodon.example/api/v1/preferences"
+    );
+    let body: Value =
+        serde_json::from_slice(recorded[0].body.as_deref().unwrap_or_default()).expect("JSON body");
+    assert_eq!(body, serde_json::json!({"posting:default:sensitive": true}));
+}
+
+#[test]
+fn update_preferences_maps_a_refused_key_to_a_typed_error() {
+    let body = br#"{"error":"unknown preference: posting:default:typo"}"#.to_vec();
+    let (instance, _) = instance_with(vec![HttpResponse {
+        status: 422,
+        retry_after_s: None,
+        body,
+    }]);
+    let patch = PreferencesPatch {
+        posting_default_sensitive: Some(true),
+        ..PreferencesPatch::default()
+    };
+
+    let error = block_on(SettingsActions::update_preferences(&instance, &patch))
+        .expect_err("the server refused the key");
+    assert!(matches!(
+        error,
+        Error::PreferenceRefused(PreferenceRefusal::UnknownKey { key })
+            if key == "posting:default:typo"
+    ));
+}
+
+#[test]
+fn update_preferences_maps_a_refused_value_to_key_and_allowed_values() {
+    let body = br#"{"error":"invalid value for posting:default:visibility: sideways; allowed values are public, unlisted, private and direct"}"#.to_vec();
+    let (instance, _) = instance_with(vec![HttpResponse {
+        status: 422,
+        retry_after_s: None,
+        body,
+    }]);
+    let patch = PreferencesPatch {
+        posting_default_visibility: Some(Visibility::Public),
+        ..PreferencesPatch::default()
+    };
+
+    let error = block_on(SettingsActions::update_preferences(&instance, &patch))
+        .expect_err("the server refused the value");
+    assert!(matches!(
+        error,
+        Error::PreferenceRefused(PreferenceRefusal::InvalidValue {
+            key,
+            value,
+            allowed,
+        }) if key == "posting:default:visibility"
+            && value == "sideways"
+            && allowed == "public, unlisted, private and direct"
+    ));
 }
