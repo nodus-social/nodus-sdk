@@ -182,6 +182,8 @@ mod tests {
             note: String::new(),
             avatar: String::new(),
             header: String::new(),
+            avatar_meta: None,
+            header_meta: None,
             bot: false,
             locked: false,
             followers_count: 0,

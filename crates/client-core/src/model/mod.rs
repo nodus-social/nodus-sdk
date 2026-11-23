@@ -48,8 +48,55 @@ pub use stream::StreamEvent;
 
 use serde::{Deserialize, Serialize};
 
+/// The rendered shape of one profile picture.
+///
+/// `size` is the `"WxH"` spelling the wire also carries as a string; `aspect` is width
+/// over height, which is what lets a renderer reserve a box before the bytes arrive.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PictureShape {
+    /// Rendered width, in pixels.
+    pub width: u32,
+    /// Rendered height, in pixels.
+    pub height: u32,
+    /// `"WxH"`, e.g. `400x300`.
+    pub size: String,
+    /// Width over height, e.g. `1.3333333333333333` for 400x300.
+    pub aspect: f64,
+}
+
+/// An account picture's renditions, keyed the way the wire spells them.
+///
+/// The whole object is absent or `null` when the shape is genuinely unknown — a remote
+/// account, the default asset, or a render still in flight — so unknown stays
+/// distinguishable from square: nothing here is ever defaulted to a `0` or a guessed
+/// aspect. `small` is deliberately `null` on this server, which keeps one profile
+/// rendition per slot; the member exists so an upstream Mastodon answer that populates
+/// it still parses.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PictureMeta {
+    /// The rendition the picture URL serves.
+    #[serde(default)]
+    pub original: Option<PictureShape>,
+    /// The thumbnail rendition, when the instance reports one.
+    #[serde(default)]
+    pub small: Option<PictureShape>,
+}
+
+impl PictureMeta {
+    /// Width and height of `original`, the rendition the URL serves.
+    ///
+    /// `small` is not a fallback: it is a thumbnail at a different pixel size, so a box
+    /// reserved from it would be the wrong box for the picture the client draws.
+    fn original_shape(&self) -> Option<(u32, u32)> {
+        self.original
+            .as_ref()
+            .map(|shape| (shape.width, shape.height))
+    }
+}
+
 /// An account, as returned by `/api/v1/accounts/:id`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Partial equality only: a [`PictureShape`] carries a float `aspect`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Actor {
     /// Instance-local id, as a string.
     pub id: String,
@@ -67,6 +114,15 @@ pub struct Actor {
     /// Header URL.
     #[serde(default)]
     pub header: String,
+    /// Shape of the picture `avatar` serves, when the instance reports one.
+    ///
+    /// `None` for a remote account, the default asset, or a picture with no rendered
+    /// variant row yet: the API sends the key absent or explicitly `null` there.
+    #[serde(default)]
+    pub avatar_meta: Option<PictureMeta>,
+    /// Shape of the picture `header` serves, on the same terms as [`Actor::avatar_meta`].
+    #[serde(default)]
+    pub header_meta: Option<PictureMeta>,
     /// Whether the account is a bot.
     #[serde(default)]
     pub bot: bool,
@@ -104,6 +160,28 @@ pub struct Actor {
     /// the account does not invent a member the instance never sent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields: Vec<ProfileField>,
+}
+
+impl Actor {
+    /// The box to reserve for the avatar, as `(width, height)`.
+    ///
+    /// This is the one place that decides what a picture's dimensions are, so a drawing
+    /// site does not re-derive it: `None` when the instance reported no shape, which a
+    /// renderer must treat as "reserve nothing yet" rather than as a square.
+    #[must_use]
+    pub fn avatar_shape(&self) -> Option<(u32, u32)> {
+        self.avatar_meta
+            .as_ref()
+            .and_then(PictureMeta::original_shape)
+    }
+
+    /// The box to reserve for the header, on the same terms as [`Actor::avatar_shape`].
+    #[must_use]
+    pub fn header_shape(&self) -> Option<(u32, u32)> {
+        self.header_meta
+            .as_ref()
+            .and_then(PictureMeta::original_shape)
+    }
 }
 
 /// Mastodon's name for an [`Actor`]; kept for existing clients.
@@ -725,5 +803,101 @@ mod tests {
         };
         let encoded = serde_json::to_value(&empty).expect("serialisable account");
         assert!(encoded.get("fields").is_none());
+    }
+
+    #[test]
+    fn an_account_decodes_the_picture_shape_the_api_publishes() {
+        // The exact document `/api/v1/accounts/:id` answers with once both pictures have
+        // a rendered variant: one rendition per slot, so `small` is `null` and the
+        // box to reserve comes from `original`.
+        let json = r#"{
+            "id": "1",
+            "acct": "ada",
+            "avatar": "https://host/media/abc/avatar",
+            "avatar_static": "https://host/media/abc/avatar_static",
+            "avatar_meta": {
+                "original": { "width": 400, "height": 300, "size": "400x300", "aspect": 1.3333333333333333 },
+                "small": null
+            },
+            "header": "https://host/media/abc/header",
+            "header_meta": {
+                "original": { "width": 1500, "height": 500, "size": "1500x500", "aspect": 3.0 },
+                "small": null
+            }
+        }"#;
+
+        let account: Account = serde_json::from_str(json).expect("valid account");
+
+        assert_eq!(account.avatar_shape(), Some((400, 300)));
+        assert_eq!(account.header_shape(), Some((1500, 500)));
+        let avatar = account.avatar_meta.as_ref().expect("avatar meta");
+        let original = avatar.original.as_ref().expect("original rendition");
+        assert_eq!(original.size, "400x300");
+        assert!((original.aspect - 4.0 / 3.0).abs() < f64::EPSILON);
+        assert_eq!(avatar.small, None);
+        assert_eq!(account.header.as_str(), "https://host/media/abc/header");
+    }
+
+    #[test]
+    fn an_account_without_picture_meta_reserves_no_box() {
+        // The overwhelmingly common case: no variant rows, a default asset, or a remote
+        // account. Absent must stay distinguishable from square, so both helpers answer
+        // `None` rather than a zero or a guessed shape.
+        let json = r#"{"id": "1", "acct": "alice", "avatar": "https://host/media/x.png"}"#;
+
+        let account: Account = serde_json::from_str(json).expect("account without picture meta");
+
+        assert_eq!(account.avatar_meta, None);
+        assert_eq!(account.header_meta, None);
+        assert_eq!(account.avatar_shape(), None);
+        assert_eq!(account.header_shape(), None);
+        assert_eq!(account.avatar.as_str(), "https://host/media/x.png");
+    }
+
+    #[test]
+    fn an_explicitly_null_picture_meta_is_still_unknown() {
+        // The API spells the key out and puts `null` in it. That is the same "unknown" as
+        // an absent key, and `small: null` must not become a shape of zeroes.
+        let json = r#"{
+            "id": "1",
+            "acct": "alice",
+            "avatar_meta": { "original": null, "small": null },
+            "header_meta": null
+        }"#;
+
+        let account: Account = serde_json::from_str(json).expect("nulls decode");
+
+        let avatar = account.avatar_meta.as_ref().expect("meta object present");
+        assert_eq!(avatar.original, None);
+        assert_eq!(avatar.small, None);
+        assert_eq!(account.avatar_shape(), None);
+        assert_eq!(account.header_meta, None);
+        assert_eq!(account.header_shape(), None);
+    }
+
+    #[test]
+    fn a_remote_picture_shape_with_a_thumbnail_round_trips() {
+        // An upstream Mastodon answer populates `small`; the member is kept for that, and
+        // the box still comes from `original`, which is what the URL serves.
+        let json = r#"{
+            "id": "1",
+            "acct": "ada@remote.test",
+            "avatar_meta": {
+                "original": { "width": 192, "height": 192, "size": "192x192", "aspect": 1.0 },
+                "small": { "width": 48, "height": 48, "size": "48x48", "aspect": 1.0 }
+            }
+        }"#;
+
+        let account: Account = serde_json::from_str(json).expect("remote-shaped account");
+        let meta = account.avatar_meta.as_ref().expect("avatar meta");
+        assert_eq!(meta.small.as_ref().map(|small| small.width), Some(48));
+        assert_eq!(account.avatar_shape(), Some((192, 192)));
+
+        let encoded = serde_json::to_value(&account).expect("serialisable account");
+        assert_eq!(encoded["avatar_meta"]["small"]["size"], "48x48");
+        assert_eq!(
+            serde_json::from_value::<Account>(encoded).expect("round trip"),
+            account
+        );
     }
 }

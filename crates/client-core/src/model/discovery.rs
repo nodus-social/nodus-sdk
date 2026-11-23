@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use super::{Account, TagHistory};
 
 /// An account the instance suggests following.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+// Partial equality only, because the account carries a picture shape whose aspect is a
+// float.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Suggestion {
     pub account: Account,
     /// Why it was suggested (`staff`, `global`, `friends_of_friends`, ...).

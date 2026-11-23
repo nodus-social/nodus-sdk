@@ -52,6 +52,10 @@ pub fn account(value: &Value) -> Option<Account> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_owned(),
+        // Misskey reports no picture dimensions, only the URLs; unknown stays `None` so
+        // the renderer reserves no box instead of guessing a square.
+        avatar_meta: None,
+        header_meta: None,
         bot: value.get("isBot").and_then(Value::as_bool).unwrap_or(false),
         locked: value
             .get("isLocked")
