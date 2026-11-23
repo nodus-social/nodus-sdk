@@ -477,6 +477,28 @@ pub struct Relationship {
 #[serde(transparent)]
 pub struct LocalId(pub String);
 
+/// One browser or app signed in to the viewer's account.
+///
+/// The address is the network as the server chose to disclose it, not the peer the
+/// client can see: an instance truncates it before it leaves the database.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthSession {
+    /// Stable identifier for the revoke verb.
+    pub id: String,
+    /// RFC 3339 stamp, kept as the wire sends it so either paint can age it.
+    pub created_at: String,
+    /// Last request from this session, absent until it has made one.
+    #[serde(default)]
+    pub last_used_at: Option<String>,
+    /// The client's `User-Agent`, verbatim.
+    pub user_agent: String,
+    /// Truncated network (`a.b.c.0/24`), absent when the server keeps no address.
+    #[serde(default)]
+    pub ip: Option<String>,
+    /// Whether this request was made by the session it describes.
+    pub current: bool,
+}
+
 /// A status being composed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Draft {

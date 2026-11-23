@@ -9,6 +9,7 @@ mod markers;
 mod meta;
 mod registration;
 mod schedule;
+mod sessions;
 mod settings;
 mod tags;
 #[cfg(test)]

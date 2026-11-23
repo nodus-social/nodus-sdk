@@ -6,7 +6,8 @@ use serde_json::Value;
 
 use crate::actions::{
     AccountActions, AdminActions, Browse, FilterActions, FilterV1Actions, HighlightActions,
-    InstanceMeta, MarkerActions, ScheduleActions, SettingsActions, StatusActions, TagActions,
+    InstanceMeta, MarkerActions, ScheduleActions, SessionActions, SettingsActions, StatusActions,
+    TagActions,
 };
 use crate::api::InstanceApi;
 use crate::model::{
@@ -832,4 +833,43 @@ fn update_preferences_maps_a_refused_value_to_key_and_allowed_values() {
             && value == "sideways"
             && allowed == "public, unlisted, private and direct"
     ));
+}
+
+#[test]
+fn sessions_reads_the_list_and_revokes_one_or_a_scope() {
+    let sessions = ok_json(
+        r#"[{"id":"7","created_at":"2026-01-01T00:00:00Z","last_used_at":null,"user_agent":"Firefox","ip":"203.0.113.0/24","current":true}]"#,
+    );
+    let (instance, requests) =
+        instance_with(vec![sessions, ok_empty(204), ok_empty(204), ok_empty(204)]);
+
+    let list = block_on(SessionActions::sessions(&instance)).expect("sessions");
+    assert_eq!(list.len(), 1);
+    assert!(list[0].current);
+    assert_eq!(list[0].ip.as_deref(), Some("203.0.113.0/24"));
+
+    block_on(SessionActions::revoke_session(&instance, "9")).expect("revoke one");
+    block_on(SessionActions::revoke_other_sessions(&instance)).expect("revoke others");
+    block_on(SessionActions::revoke_all_sessions(&instance)).expect("revoke all");
+
+    let recorded = requests.borrow();
+    assert_eq!(recorded.len(), 4);
+    assert_eq!(recorded[0].method, "GET");
+    assert_eq!(
+        recorded[0].url,
+        "https://mastodon.example/api/v1/auth/sessions"
+    );
+    assert_eq!(
+        recorded[1].url,
+        "https://mastodon.example/api/v1/auth/sessions/9"
+    );
+    assert_eq!(recorded[1].method, "DELETE");
+    assert_eq!(
+        recorded[2].url,
+        "https://mastodon.example/api/v1/auth/sessions?scope=others"
+    );
+    assert_eq!(
+        recorded[3].url,
+        "https://mastodon.example/api/v1/auth/sessions?scope=all"
+    );
 }

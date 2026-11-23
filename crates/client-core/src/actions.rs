@@ -23,14 +23,14 @@ use core::future::Future;
 use crate::model::{
     Account, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
     AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
-    AuditFilter, Conversation, CustomEmoji, DomainAllow, DomainBlock, DomainBlockDraft,
-    DomainImportOutcome, DomainSeverity, Draft, EmailDomainBlock, FeaturedTag, Filter, FilterDraft,
-    FilterV1, FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language, List, LocalId,
-    MarkerTimeline, MarkerUpdate, Markers, MediaAttachment, ModerationAction, NewScanner, NodeLog,
-    Page, PageParams, Poll, Preferences, PreferencesPatch, Relationship, Report, ReportDraft,
-    ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest, ScanSeverity, Scanner,
-    ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status, Suggestion, Tag, Topology,
-    TrendingLink, TriggerOutcome, WarningPreset,
+    AuditFilter, AuthSession, Conversation, CustomEmoji, DomainAllow, DomainBlock,
+    DomainBlockDraft, DomainImportOutcome, DomainSeverity, Draft, EmailDomainBlock, FeaturedTag,
+    Filter, FilterDraft, FilterV1, FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language,
+    List, LocalId, MarkerTimeline, MarkerUpdate, Markers, MediaAttachment, ModerationAction,
+    NewScanner, NodeLog, Page, PageParams, Poll, Preferences, PreferencesPatch, Relationship,
+    Report, ReportDraft, ReportFilter, ReportState, Rule, Scan, ScanFlag, ScanRequest,
+    ScanSeverity, Scanner, ScannerAsset, ScannerRule, ScheduledStatus, SearchResults, Status,
+    Suggestion, Tag, Topology, TrendingLink, TriggerOutcome, WarningPreset,
 };
 
 /// Things done to a status.
@@ -811,6 +811,28 @@ pub trait SettingsActions {
 
     /// Marks an announcement as read, so it stops appearing.
     fn dismiss_announcement(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+}
+
+/// Where the account is signed in, and the way to end one of those sessions.
+///
+/// The list is a Nodus surface gated by `Feature::Sessions`: the transport cannot see the
+/// capability answer, so the caller decides whether to ask. A session carries its own
+/// `current` flag because only the server can tell which request's cookie it was.
+pub trait SessionActions {
+    /// Error type of the transport.
+    type Error: Debug;
+
+    /// Every browser and app signed in to the account, newest first.
+    fn sessions(&self) -> impl Future<Output = Result<Vec<AuthSession>, Self::Error>>;
+
+    /// Ends one session. The viewer's own session cannot be revoked this way.
+    fn revoke_session(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Ends every session except the one making the request.
+    fn revoke_other_sessions(&self) -> impl Future<Output = Result<(), Self::Error>>;
+
+    /// Ends every session, including the one making the request.
+    fn revoke_all_sessions(&self) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 /// The approval queue: who may join this instance.
