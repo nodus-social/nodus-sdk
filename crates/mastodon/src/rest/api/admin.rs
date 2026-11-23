@@ -846,7 +846,11 @@ mod tests {
     #[test]
     fn the_audit_log_is_read_rather_than_refused() {
         let (instance, seen) = instance();
-        block_on(instance.audit(10)).expect("the audit log is served");
+        block_on(instance.audit(&AuditFilter {
+            limit: Some(10),
+            ..AuditFilter::default()
+        }))
+        .expect("the audit log is served");
         let (method, url, _) = seen.borrow()[0].clone();
         assert_eq!(method, "GET");
         assert!(
