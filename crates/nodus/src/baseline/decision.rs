@@ -174,5 +174,8 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         // `users/notes` + `notes/conversation` but no combined payload. If either gains
         // one, this arm changes with it.
         Feature::Pages => [false, false, false],
+        // Neither upstream protocol publishes a profile's banner arrangement, so this
+        // surface exists only where the published list says it does.
+        Feature::StylePublic => [false, false, false],
     }
 }

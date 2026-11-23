@@ -78,6 +78,7 @@ impl Feature {
             Self::FeaturedTags => "featured_tags",
             Self::NotificationSettings => "notification_settings",
             Self::Pages => "pages",
+            Self::StylePublic => "style_public",
         }
     }
 

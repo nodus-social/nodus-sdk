@@ -161,6 +161,10 @@ pub enum Feature {
     /// A page-shaped read of a profile or thread in one payload
     /// (`GET /api/v1/pages/profile/:id`, `GET /api/v1/pages/status/:id` on Nodus).
     Pages,
+    /// Publishing the banners a profile shows to other readers
+    /// (`PUT /api/v1/style/public`, read at
+    /// `GET /api/v1/accounts/:id/style_public` on Nodus).
+    StylePublic,
 }
 
 impl Feature {
@@ -168,7 +172,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 71;
+    pub const COUNT: usize = 72;
 
     /// Every capability this build names.
     ///
@@ -246,6 +250,7 @@ impl Feature {
         Self::FeaturedTags,
         Self::NotificationSettings,
         Self::Pages,
+        Self::StylePublic,
     ];
 }
 

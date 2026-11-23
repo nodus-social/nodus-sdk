@@ -114,6 +114,7 @@ fn every_name_in_the_vocabulary_parses() {
         "featured_tags",
         "notification_settings",
         "pages",
+        "style_public",
     ];
     assert_eq!(published.len(), Feature::COUNT);
     for name in published {
@@ -199,6 +200,7 @@ fn the_vocabulary_is_exactly_the_named_list() {
         "featured_tags",
         "notification_settings",
         "pages",
+        "style_public",
     ];
     ours.sort_unstable();
     backend.sort_unstable();

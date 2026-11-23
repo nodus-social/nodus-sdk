@@ -164,9 +164,9 @@ fn a_nodus_payload_with_every_name_leaves_nothing_unknown() {
         .iter()
         .map(|feature| feature.as_str().to_owned())
         .collect();
-    assert_eq!(names.len(), 71);
+    assert_eq!(names.len(), 72);
     let capabilities = Capabilities::from_published(&names);
-    assert_eq!(capabilities.features.len(), 71);
+    assert_eq!(capabilities.features.len(), 72);
     assert_eq!(capabilities.unknown, Vec::<String>::new());
     assert_eq!(
         capabilities.features,

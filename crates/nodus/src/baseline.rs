@@ -153,6 +153,7 @@ mod tests {
         (Feature::FeaturedTags, false, true, false),
         (Feature::NotificationSettings, false, true, false),
         (Feature::Pages, false, false, false),
+        (Feature::StylePublic, false, false, false),
     ];
 
     #[test]
