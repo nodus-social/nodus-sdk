@@ -983,9 +983,7 @@ where
             .as_deref()
             .and_then(|cursor| cursor.parse().ok())
             .unwrap_or(0);
-        let accounts = self
-            .instance
-            .directory(local, offset)
+        let accounts = InstanceApi::directory(&self.instance, local, offset)
             .await
             .map_err(SdkError::Instance)?;
         let read = u32::try_from(accounts.len()).unwrap_or(u32::MAX);
@@ -1006,7 +1004,9 @@ where
         kind: &PageKind,
     ) -> Result<(PageItems, Option<String>), SdkError<<I as InstanceApi>::Error, D::Error>> {
         let answer = if matches!(kind, PageKind::Filters) {
-            let items = self.instance.filters().await.map_err(SdkError::Instance)?;
+            let items = InstanceApi::filters(&self.instance)
+                .await
+                .map_err(SdkError::Instance)?;
             (PageItems::Filters(items), None)
         } else {
             // Featured tags are public on an account, but this page is "mine": the
@@ -1017,11 +1017,10 @@ where
                 .get()
                 .map(|session| session.account_id)
                 .ok_or(SdkError::NotSignedIn)?;
-            let items = self
-                .instance
-                .featured_tags(&nodus_client_core::LocalId(account))
-                .await
-                .map_err(SdkError::Instance)?;
+            let items =
+                InstanceApi::featured_tags(&self.instance, &nodus_client_core::LocalId(account))
+                    .await
+                    .map_err(SdkError::Instance)?;
             (PageItems::FeaturedTags(items), None)
         };
         Ok(answer)
@@ -1042,25 +1041,19 @@ where
                 (PageItems::Notifications(page.items), page.next_max_id)
             }
             PageKind::Conversations => {
-                let page = self
-                    .instance
-                    .conversations(params)
+                let page = InstanceApi::conversations(&self.instance, params)
                     .await
                     .map_err(SdkError::Instance)?;
                 (PageItems::Conversations(page.items), page.next_max_id)
             }
             PageKind::Favourites => {
-                let page = self
-                    .instance
-                    .favourites(params)
+                let page = InstanceApi::favourites(&self.instance, params)
                     .await
                     .map_err(SdkError::Instance)?;
                 (PageItems::Statuses(page.items), page.next_max_id)
             }
             PageKind::Bookmarks => {
-                let page = self
-                    .instance
-                    .bookmarks(params)
+                let page = InstanceApi::bookmarks(&self.instance, params)
                     .await
                     .map_err(SdkError::Instance)?;
                 (PageItems::Statuses(page.items), page.next_max_id)
@@ -1082,17 +1075,13 @@ where
                 (PageItems::Accounts(page.items), page.next_max_id)
             }
             PageKind::Mutes => {
-                let page = self
-                    .instance
-                    .mutes(params)
+                let page = InstanceApi::mutes(&self.instance, params)
                     .await
                     .map_err(SdkError::Instance)?;
                 (PageItems::Accounts(page.items), page.next_max_id)
             }
             PageKind::Blocks => {
-                let page = self
-                    .instance
-                    .blocks(params)
+                let page = InstanceApi::blocks(&self.instance, params)
                     .await
                     .map_err(SdkError::Instance)?;
                 (PageItems::Accounts(page.items), page.next_max_id)
@@ -1106,9 +1095,7 @@ where
                 (PageItems::Scheduled(items), None)
             }
             PageKind::Search(query) => {
-                let results = self
-                    .instance
-                    .search(query, false)
+                let results = InstanceApi::search(&self.instance, query, false)
                     .await
                     .map_err(SdkError::Instance)?;
                 (PageItems::Search(Box::new(results)), None)
@@ -1175,19 +1162,19 @@ where
     }
 
     async fn conversations(&self, params: PageParams) -> Result<Page<Conversation>, Self::Error> {
-        self.instance.conversations(params).await
+        InstanceApi::conversations(&self.instance, params).await
     }
 
     async fn favourites(&self, params: PageParams) -> Result<Page<Status>, Self::Error> {
-        self.instance.favourites(params).await
+        InstanceApi::favourites(&self.instance, params).await
     }
 
     async fn bookmarks(&self, params: PageParams) -> Result<Page<Status>, Self::Error> {
-        self.instance.bookmarks(params).await
+        InstanceApi::bookmarks(&self.instance, params).await
     }
 
     async fn lists(&self) -> Result<Vec<List>, Self::Error> {
-        self.instance.lists().await
+        InstanceApi::lists(&self.instance).await
     }
 
     async fn scheduled(&self) -> Result<Vec<ScheduledStatus>, Self::Error> {
@@ -1195,10 +1182,10 @@ where
     }
 
     async fn directory(&self, local_only: bool, offset: u32) -> Result<Vec<Account>, Self::Error> {
-        self.instance.directory(local_only, offset).await
+        InstanceApi::directory(&self.instance, local_only, offset).await
     }
 
     async fn search(&self, query: &str, resolve: bool) -> Result<SearchResults, Self::Error> {
-        self.instance.search(query, resolve).await
+        InstanceApi::search(&self.instance, query, resolve).await
     }
 }

@@ -20,8 +20,9 @@ pub mod note_actions;
 use core::fmt;
 
 use nodus_client_core::model::{
-    Account, Context, CredentialAccount, Draft, LocalId, Notification, Page, PageParams,
-    Relationship, Status, StreamKind,
+    Account, Announcement, Context, Conversation, CredentialAccount, Draft, FeaturedTag, Filter,
+    List, LocalId, MarkerTimeline, Markers, Notification, Page, PageParams, Preferences,
+    Relationship, SearchResults, Status, StreamKind, Tag,
 };
 use nodus_client_core::rest::{HttpRequest, HttpResponse, Method, Transport};
 use nodus_client_core::{Error, Instance, Result};
@@ -315,6 +316,206 @@ impl<T: Transport> nodus_client_core::InstanceApi for MisskeyInstance<T> {
             .await
     }
 
+    fn featured_tags(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Vec<FeaturedTag>>> {
+        // Misskey pins notes to a profile; it has no notion of a featured hashtag.
+        core::future::ready(Err(Error::Unsupported("the featured tags endpoint")))
+    }
+
+    fn bookmarks(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>>> {
+        // Misskey keeps favourites only: /api/i/favorites is the whole collection,
+        // and there is no second list to keep notes in.
+        core::future::ready(Err(Error::Unsupported("the bookmarks endpoint")))
+    }
+
+    async fn favourites(&self, params: PageParams) -> Result<Page<Status>> {
+        self.page("/api/i/favorites", &params, convert::status)
+            .await
+    }
+
+    fn conversations(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Conversation>>> {
+        // Direct messages are not a thread object in Misskey's API.
+        core::future::ready(Err(Error::Unsupported("the conversations endpoint")))
+    }
+
+    async fn lists(&self) -> Result<Vec<List>> {
+        let value = self.call("/api/users/lists/list", json!({})).await?;
+        Ok(value
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|list| {
+                Some(List {
+                    id: list.get("id")?.as_str()?.to_owned(),
+                    title: list.get("name")?.as_str()?.to_owned(),
+                    replies_policy: String::new(),
+                    exclusive: None,
+                })
+            })
+            .collect())
+    }
+
+    async fn follow_requests(&self) -> Result<Vec<Account>> {
+        let value = self.call("/api/following/requests/list", json!({})).await?;
+        Ok(value
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|request| convert::account(request.get("follower")?))
+            .collect())
+    }
+
+    async fn mutes(&self, params: PageParams) -> Result<Page<Account>> {
+        self.page("/api/mute/list", &params, |value| convert::account(&value))
+            .await
+    }
+
+    async fn blocks(&self, params: PageParams) -> Result<Page<Account>> {
+        self.page("/api/blocking/list", &params, |value| {
+            convert::account(&value)
+        })
+        .await
+    }
+
+    fn preferences(&self) -> impl core::future::Future<Output = Result<Preferences>> {
+        // Client settings live in i/registry, which is per-app storage, not a
+        // posting-defaults endpoint the server applies.
+        core::future::ready(Err(Error::Unsupported("reading preferences")))
+    }
+
+    fn filters(&self) -> impl core::future::Future<Output = Result<Vec<Filter>>> {
+        // Word mutes live in i/registry on the client; the server filters nothing.
+        core::future::ready(Err(Error::Unsupported("server-side filters")))
+    }
+
+    fn markers(
+        &self,
+        _timelines: &[MarkerTimeline],
+    ) -> impl core::future::Future<Output = Result<Markers>> {
+        core::future::ready(Err(Error::Unsupported("reading markers")))
+    }
+
+    async fn announcements(&self) -> Result<Vec<Announcement>> {
+        let value = self.call("/api/announcements", json!({})).await?;
+        Ok(value
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|announcement| {
+                let title = announcement.get("title").and_then(Value::as_str);
+                let text = announcement.get("text").and_then(Value::as_str);
+                let content = match (title, text) {
+                    (Some(title), Some(text)) => format!("{title}\n\n{text}"),
+                    (Some(title), None) => title.to_owned(),
+                    (None, Some(text)) => text.to_owned(),
+                    (None, None) => return None,
+                };
+                Some(Announcement {
+                    id: announcement.get("id")?.as_str()?.to_owned(),
+                    content,
+                    published: true,
+                    all_day: false,
+                    published_at: announcement
+                        .get("createdAt")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    starts_at: None,
+                    ends_at: None,
+                    read: announcement.get("isRead").and_then(Value::as_bool),
+                })
+            })
+            .collect())
+    }
+
+    async fn directory(&self, local_only: bool, offset: u32) -> Result<Vec<Account>> {
+        let value = self
+            .call(
+                "/api/users",
+                json!({
+                    "limit": 40,
+                    "offset": offset,
+                    "origin": if local_only { "local" } else { "combined" },
+                    "sort": "+follower",
+                }),
+            )
+            .await?;
+        Ok(value
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|user| convert::account(&user))
+            .collect())
+    }
+
+    async fn search(&self, query: &str, _resolve: bool) -> Result<SearchResults> {
+        // Misskey splits what Mastodon returns in one object across three endpoints.
+        // `resolve` has no counterpart: these searches never fetch remote objects.
+        let limit = 20;
+        let notes = self
+            .call(
+                "/api/notes/search",
+                json!({ "query": query, "limit": limit }),
+            )
+            .await?;
+        let users = self
+            .call(
+                "/api/users/search",
+                json!({ "query": query, "limit": limit }),
+            )
+            .await?;
+        let hashtags = self
+            .call(
+                "/api/hashtags/search",
+                json!({ "query": query, "limit": limit }),
+            )
+            .await?;
+        Ok(SearchResults {
+            accounts: users
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .filter_map(convert::account)
+                .collect(),
+            statuses: notes
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(convert::status)
+                .collect(),
+            hashtags: hashtags
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter_map(|tag| {
+                    Some(Tag {
+                        id: None,
+                        name: tag.get("tag")?.as_str()?.trim_start_matches('#').to_owned(),
+                        url: String::new(),
+                        history: Vec::new(),
+                        following: false,
+                        statuses_count: None,
+                        following_count: None,
+                    })
+                })
+                .collect(),
+        })
+    }
+
     async fn relationship(&self, id: &LocalId) -> Result<Relationship> {
         self.relation(id).await
     }
@@ -452,6 +653,26 @@ mod tests {
             core::task::Poll::Ready(output) => output,
             core::task::Poll::Pending => panic!("the mock transport never pends"),
         }
+    }
+
+    #[test]
+    fn search_merges_notes_users_and_hashtags() {
+        let (client, requests) = instance_with(vec![
+            ok_json(&json!([sample_note("n1")])),
+            ok_json(&json!([{ "id": "u1", "username": "alice" }])),
+            ok_json(&json!([{ "tag": "#rust" }])),
+        ]);
+
+        let results = block_on(client.search("rust", false)).expect("search");
+        let sent = requests.borrow();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[0].url, "https://misskey.example/api/notes/search");
+        assert_eq!(sent[0].body["query"], json!("rust"));
+        assert_eq!(sent[1].url, "https://misskey.example/api/users/search");
+        assert_eq!(sent[2].url, "https://misskey.example/api/hashtags/search");
+        assert_eq!(results.statuses.len(), 1);
+        assert_eq!(results.accounts[0].acct, "alice");
+        assert_eq!(results.hashtags[0].name, "rust");
     }
 
     fn sample_note(id: &str) -> Value {

@@ -8,8 +8,9 @@
 use core::future::Future;
 
 use nodus_client_core::{
-    Account, Context, Draft, InstanceApi, LocalId, Notification, Page, PageParams, Relationship,
-    Status, StreamKind,
+    Account, Announcement, Context, Conversation, Draft, FeaturedTag, Filter, InstanceApi, List,
+    LocalId, MarkerTimeline, Markers, Notification, Page, PageParams, Preferences, Relationship,
+    SearchResults, Status, StreamKind,
 };
 use nodus_persist::MemoryPersistence;
 use nodus_shared::{AccountFeed, EventBatch, MeResponse, Meta, PostFeed};
@@ -119,6 +120,91 @@ impl InstanceApi for UnavailableBackend {
         _id: &LocalId,
         _params: PageParams,
     ) -> impl Future<Output = Result<Page<Status>, Self::Error>> {
+        unavailable()
+    }
+
+    fn featured_tags(
+        &self,
+        _id: &LocalId,
+    ) -> impl Future<Output = Result<Vec<FeaturedTag>, Self::Error>> {
+        unavailable()
+    }
+
+    fn bookmarks(
+        &self,
+        _params: PageParams,
+    ) -> impl Future<Output = Result<Page<Status>, Self::Error>> {
+        unavailable()
+    }
+
+    fn favourites(
+        &self,
+        _params: PageParams,
+    ) -> impl Future<Output = Result<Page<Status>, Self::Error>> {
+        unavailable()
+    }
+
+    fn conversations(
+        &self,
+        _params: PageParams,
+    ) -> impl Future<Output = Result<Page<Conversation>, Self::Error>> {
+        unavailable()
+    }
+
+    fn lists(&self) -> impl Future<Output = Result<Vec<List>, Self::Error>> {
+        unavailable()
+    }
+
+    fn follow_requests(&self) -> impl Future<Output = Result<Vec<Account>, Self::Error>> {
+        unavailable()
+    }
+
+    fn mutes(
+        &self,
+        _params: PageParams,
+    ) -> impl Future<Output = Result<Page<Account>, Self::Error>> {
+        unavailable()
+    }
+
+    fn blocks(
+        &self,
+        _params: PageParams,
+    ) -> impl Future<Output = Result<Page<Account>, Self::Error>> {
+        unavailable()
+    }
+
+    fn preferences(&self) -> impl Future<Output = Result<Preferences, Self::Error>> {
+        unavailable()
+    }
+
+    fn filters(&self) -> impl Future<Output = Result<Vec<Filter>, Self::Error>> {
+        unavailable()
+    }
+
+    fn markers(
+        &self,
+        _timelines: &[MarkerTimeline],
+    ) -> impl Future<Output = Result<Markers, Self::Error>> {
+        unavailable()
+    }
+
+    fn announcements(&self) -> impl Future<Output = Result<Vec<Announcement>, Self::Error>> {
+        unavailable()
+    }
+
+    fn directory(
+        &self,
+        _local_only: bool,
+        _offset: u32,
+    ) -> impl Future<Output = Result<Vec<Account>, Self::Error>> {
+        unavailable()
+    }
+
+    fn search(
+        &self,
+        _query: &str,
+        _resolve: bool,
+    ) -> impl Future<Output = Result<SearchResults, Self::Error>> {
         unavailable()
     }
 

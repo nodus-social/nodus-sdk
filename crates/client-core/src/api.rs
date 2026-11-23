@@ -14,8 +14,9 @@ use core::fmt::Debug;
 use core::future::Future;
 
 use crate::model::{
-    Account, Context, Draft, LocalId, Notification, Page, PageParams, Relationship, Status,
-    StreamKind,
+    Account, Announcement, Context, Conversation, Draft, FeaturedTag, Filter, List, LocalId,
+    MarkerTimeline, Markers, Notification, Page, PageParams, Preferences, Relationship,
+    SearchResults, Status, StreamKind,
 };
 
 /// The read and write operations the client performs against one instance.
@@ -102,6 +103,90 @@ pub trait InstanceApi {
         id: &LocalId,
         params: PageParams,
     ) -> impl Future<Output = Result<Page<Status>, Self::Error>>;
+
+    /// The tags an account has pinned to its profile.
+    ///
+    /// Public on Mastodon, so a profile page can paint it for any account the
+    /// instance knows; the settings screen asks for the signed-in account's own id.
+    fn featured_tags(
+        &self,
+        id: &LocalId,
+    ) -> impl Future<Output = Result<Vec<FeaturedTag>, Self::Error>>;
+
+    /// Statuses the account bookmarked, newest first.
+    fn bookmarks(
+        &self,
+        params: PageParams,
+    ) -> impl Future<Output = Result<Page<Status>, Self::Error>>;
+
+    /// Statuses the account favourited, newest first.
+    fn favourites(
+        &self,
+        params: PageParams,
+    ) -> impl Future<Output = Result<Page<Status>, Self::Error>>;
+
+    /// Direct-message threads, newest first.
+    fn conversations(
+        &self,
+        params: PageParams,
+    ) -> impl Future<Output = Result<Page<Conversation>, Self::Error>>;
+
+    /// The account's lists, whole rather than paged.
+    fn lists(&self) -> impl Future<Output = Result<Vec<List>, Self::Error>>;
+
+    /// Accounts waiting for this account to approve them.
+    ///
+    /// The endpoint answers a bare array: follow requests are not paged by id, so
+    /// there is no `Page` to advance.
+    fn follow_requests(&self) -> impl Future<Output = Result<Vec<Account>, Self::Error>>;
+
+    /// Accounts this account mutes, newest first.
+    fn mutes(&self, params: PageParams)
+    -> impl Future<Output = Result<Page<Account>, Self::Error>>;
+
+    /// Accounts this account blocks, newest first.
+    fn blocks(
+        &self,
+        params: PageParams,
+    ) -> impl Future<Output = Result<Page<Account>, Self::Error>>;
+
+    /// The signed-in account's posting and reading defaults.
+    fn preferences(&self) -> impl Future<Output = Result<Preferences, Self::Error>>;
+
+    /// The filters this account keeps.
+    ///
+    /// The server applies them to timelines on its own; this read is for the
+    /// settings list, and for matching a thread assembled from cached statuses.
+    fn filters(&self) -> impl Future<Output = Result<Vec<Filter>, Self::Error>>;
+
+    /// The server-held reading positions for `timelines`.
+    fn markers(
+        &self,
+        timelines: &[MarkerTimeline],
+    ) -> impl Future<Output = Result<Markers, Self::Error>>;
+
+    /// Announcements the instance is showing.
+    fn announcements(&self) -> impl Future<Output = Result<Vec<Announcement>, Self::Error>>;
+
+    /// One page of the instance's account directory.
+    ///
+    /// Paged by offset rather than by id: the endpoint answers a bare array, so a
+    /// caller advances by the number of accounts it received.
+    fn directory(
+        &self,
+        local_only: bool,
+        offset: u32,
+    ) -> impl Future<Output = Result<Vec<Account>, Self::Error>>;
+
+    /// Searches accounts, statuses and hashtags.
+    ///
+    /// `resolve` is the difference between what this instance already knows and
+    /// going out to fetch an unknown `acct`, which can take seconds.
+    fn search(
+        &self,
+        query: &str,
+        resolve: bool,
+    ) -> impl Future<Output = Result<SearchResults, Self::Error>>;
 
     /// Whether the signed-in account follows `id`.
     fn relationship(&self, id: &LocalId)

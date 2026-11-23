@@ -1,7 +1,9 @@
 //! Sync consent is state like any other: a command, not a view-local flag.
 
 use nodus_client_core::model::{
-    Account, Context, Draft, LocalId, Notification, Page, PageParams, Relationship, Status,
+    Account, Announcement, Context, Conversation, Draft, FeaturedTag, Filter, List, LocalId,
+    MarkerTimeline, Markers, Notification, Page, PageParams, Preferences, Relationship,
+    SearchResults, Status,
 };
 use nodus_client_core::{InstanceApi, StreamKind};
 use nodus_shared::{AccountFeed, EventBatch, MeResponse, Meta, PostFeed};
@@ -300,6 +302,95 @@ impl InstanceApi for Pages {
         _id: &str,
     ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
         fail::<()>()
+    }
+
+    fn featured_tags(
+        &self,
+        _id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Vec<FeaturedTag>, Self::Error>> {
+        fail::<Vec<FeaturedTag>>()
+    }
+
+    fn bookmarks(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        fail::<Page<Status>>()
+    }
+
+    fn favourites(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        fail::<Page<Status>>()
+    }
+
+    fn conversations(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Conversation>, Self::Error>> {
+        fail::<Page<Conversation>>()
+    }
+
+    fn lists(&self) -> impl core::future::Future<Output = Result<Vec<List>, Self::Error>> {
+        fail::<Vec<List>>()
+    }
+
+    fn follow_requests(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        fail::<Vec<Account>>()
+    }
+
+    fn mutes(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn blocks(
+        &self,
+        _params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        fail::<Page<Account>>()
+    }
+
+    fn preferences(&self) -> impl core::future::Future<Output = Result<Preferences, Self::Error>> {
+        fail::<Preferences>()
+    }
+
+    fn filters(&self) -> impl core::future::Future<Output = Result<Vec<Filter>, Self::Error>> {
+        fail::<Vec<Filter>>()
+    }
+
+    fn markers(
+        &self,
+        _timelines: &[MarkerTimeline],
+    ) -> impl core::future::Future<Output = Result<Markers, Self::Error>> {
+        fail::<Markers>()
+    }
+
+    fn announcements(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Announcement>, Self::Error>> {
+        fail::<Vec<Announcement>>()
+    }
+
+    fn directory(
+        &self,
+        _local_only: bool,
+        _offset: u32,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        fail::<Vec<Account>>()
+    }
+
+    fn search(
+        &self,
+        _query: &str,
+        _resolve: bool,
+    ) -> impl core::future::Future<Output = Result<SearchResults, Self::Error>> {
+        fail::<SearchResults>()
     }
 }
 
@@ -752,6 +843,95 @@ impl InstanceApi for RichInstance {
         _id: &str,
     ) -> impl core::future::Future<Output = Result<(), Self::Error>> {
         fail::<()>()
+    }
+
+    fn featured_tags(
+        &self,
+        id: &LocalId,
+    ) -> impl core::future::Future<Output = Result<Vec<FeaturedTag>, Self::Error>> {
+        <Self as nodus_client_core::actions::HighlightActions>::featured_tags(self, id)
+    }
+
+    fn bookmarks(
+        &self,
+        params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        <Self as nodus_client_core::actions::Browse>::bookmarks(self, params)
+    }
+
+    fn favourites(
+        &self,
+        params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Status>, Self::Error>> {
+        <Self as nodus_client_core::actions::Browse>::favourites(self, params)
+    }
+
+    fn conversations(
+        &self,
+        params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Conversation>, Self::Error>> {
+        <Self as nodus_client_core::actions::Browse>::conversations(self, params)
+    }
+
+    fn lists(&self) -> impl core::future::Future<Output = Result<Vec<List>, Self::Error>> {
+        <Self as nodus_client_core::actions::Browse>::lists(self)
+    }
+
+    fn follow_requests(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        <Self as nodus_client_core::actions::AccountActions>::follow_requests(self)
+    }
+
+    fn mutes(
+        &self,
+        params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        <Self as nodus_client_core::actions::AccountActions>::mutes(self, params)
+    }
+
+    fn blocks(
+        &self,
+        params: PageParams,
+    ) -> impl core::future::Future<Output = Result<Page<Account>, Self::Error>> {
+        <Self as nodus_client_core::actions::AccountActions>::blocks(self, params)
+    }
+
+    fn preferences(&self) -> impl core::future::Future<Output = Result<Preferences, Self::Error>> {
+        fail::<Preferences>()
+    }
+
+    fn filters(&self) -> impl core::future::Future<Output = Result<Vec<Filter>, Self::Error>> {
+        <Self as nodus_client_core::actions::FilterActions>::filters(self)
+    }
+
+    fn markers(
+        &self,
+        _timelines: &[MarkerTimeline],
+    ) -> impl core::future::Future<Output = Result<Markers, Self::Error>> {
+        fail::<Markers>()
+    }
+
+    fn announcements(
+        &self,
+    ) -> impl core::future::Future<Output = Result<Vec<Announcement>, Self::Error>> {
+        fail::<Vec<Announcement>>()
+    }
+
+    fn directory(
+        &self,
+        local_only: bool,
+        offset: u32,
+    ) -> impl core::future::Future<Output = Result<Vec<Account>, Self::Error>> {
+        <Self as nodus_client_core::actions::Browse>::directory(self, local_only, offset)
+    }
+
+    fn search(
+        &self,
+        query: &str,
+        resolve: bool,
+    ) -> impl core::future::Future<Output = Result<SearchResults, Self::Error>> {
+        <Self as nodus_client_core::actions::Search>::search(self, query, resolve)
     }
 }
 

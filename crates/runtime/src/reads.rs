@@ -315,19 +315,19 @@ where
     }
 
     async fn conversations(&self, params: PageParams) -> Result<Page<Conversation>, Self::Error> {
-        self.instance.conversations(params).await
+        InstanceApi::conversations(&self.instance, params).await
     }
 
     async fn favourites(&self, params: PageParams) -> Result<Page<Status>, Self::Error> {
-        self.instance.favourites(params).await
+        InstanceApi::favourites(&self.instance, params).await
     }
 
     async fn bookmarks(&self, params: PageParams) -> Result<Page<Status>, Self::Error> {
-        self.instance.bookmarks(params).await
+        InstanceApi::bookmarks(&self.instance, params).await
     }
 
     async fn lists(&self) -> Result<Vec<List>, Self::Error> {
-        self.instance.lists().await
+        InstanceApi::lists(&self.instance).await
     }
 
     async fn scheduled(&self) -> Result<Vec<ScheduledStatus>, Self::Error> {
@@ -335,10 +335,10 @@ where
     }
 
     async fn directory(&self, local_only: bool, offset: u32) -> Result<Vec<Account>, Self::Error> {
-        self.instance.directory(local_only, offset).await
+        InstanceApi::directory(&self.instance, local_only, offset).await
     }
 
     async fn search(&self, query: &str, resolve: bool) -> Result<SearchResults, Self::Error> {
-        self.instance.search(query, resolve).await
+        InstanceApi::search(&self.instance, query, resolve).await
     }
 }

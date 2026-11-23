@@ -513,7 +513,11 @@ fn markers_read_asks_only_for_the_requested_timelines() {
         r#"{"home":{"last_read_id":"42","version":3},"notifications":{"last_read_id":"9"}}"#,
     )]);
 
-    let markers = block_on(instance.markers(&[MarkerTimeline::Notifications])).expect("markers");
+    let markers = block_on(nodus_client_core::actions::MarkerActions::markers(
+        &instance,
+        &[MarkerTimeline::Notifications],
+    ))
+    .expect("markers");
     assert_eq!(
         markers
             .get(MarkerTimeline::Notifications)
@@ -723,7 +727,11 @@ fn parity_endpoints_map_a_rejected_write_to_the_server_message() {
         )
     };
     assert!(rejected(
-        block_on(instance.markers(&[MarkerTimeline::Home])).map(|_| ())
+        block_on(nodus_client_core::actions::MarkerActions::markers(
+            &instance,
+            &[MarkerTimeline::Home]
+        ))
+        .map(|_| ())
     ));
     assert!(rejected(
         block_on(instance.save_markers(&updates)).map(|_| ())

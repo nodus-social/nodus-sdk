@@ -14,10 +14,14 @@ mod tags;
 #[cfg(test)]
 mod tests;
 
+use crate::actions::{
+    AccountActions, Browse, FilterActions, HighlightActions, MarkerActions, Search, SettingsActions,
+};
 use crate::api::InstanceApi;
 use crate::model::{
-    Account, Context, Draft, LocalId, Notification, Page, PageParams, Relationship, Status,
-    StreamKind,
+    Account, Announcement, Context, Conversation, Draft, FeaturedTag, Filter, List, LocalId,
+    MarkerTimeline, Markers, Notification, Page, PageParams, Preferences, Relationship,
+    SearchResults, Status, StreamKind,
 };
 use crate::rest::{RestInstance, Transport};
 use crate::{Error, Result};
@@ -99,6 +103,62 @@ impl<T: Transport> InstanceApi for RestInstance<T> {
     async fn account_statuses(&self, id: &LocalId, params: PageParams) -> Result<Page<Status>> {
         let url = self.page_url_segments(&["api", "v1", "accounts", &id.0, "statuses"], &params)?;
         self.fetch_page(self.get(url), &params).await
+    }
+
+    async fn featured_tags(&self, id: &LocalId) -> Result<Vec<FeaturedTag>> {
+        HighlightActions::featured_tags(self, id).await
+    }
+
+    async fn bookmarks(&self, params: PageParams) -> Result<Page<Status>> {
+        Browse::bookmarks(self, params).await
+    }
+
+    async fn favourites(&self, params: PageParams) -> Result<Page<Status>> {
+        Browse::favourites(self, params).await
+    }
+
+    async fn conversations(&self, params: PageParams) -> Result<Page<Conversation>> {
+        Browse::conversations(self, params).await
+    }
+
+    async fn lists(&self) -> Result<Vec<List>> {
+        Browse::lists(self).await
+    }
+
+    async fn follow_requests(&self) -> Result<Vec<Account>> {
+        AccountActions::follow_requests(self).await
+    }
+
+    async fn mutes(&self, params: PageParams) -> Result<Page<Account>> {
+        AccountActions::mutes(self, params).await
+    }
+
+    async fn blocks(&self, params: PageParams) -> Result<Page<Account>> {
+        AccountActions::blocks(self, params).await
+    }
+
+    async fn preferences(&self) -> Result<Preferences> {
+        SettingsActions::preferences(self).await
+    }
+
+    async fn filters(&self) -> Result<Vec<Filter>> {
+        FilterActions::filters(self).await
+    }
+
+    async fn markers(&self, timelines: &[MarkerTimeline]) -> Result<Markers> {
+        MarkerActions::markers(self, timelines).await
+    }
+
+    async fn announcements(&self) -> Result<Vec<Announcement>> {
+        SettingsActions::announcements(self).await
+    }
+
+    async fn directory(&self, local_only: bool, offset: u32) -> Result<Vec<Account>> {
+        Browse::directory(self, local_only, offset).await
+    }
+
+    async fn search(&self, query: &str, resolve: bool) -> Result<SearchResults> {
+        Search::search(self, query, resolve).await
     }
 
     async fn relationship(&self, id: &LocalId) -> Result<Relationship> {
