@@ -165,6 +165,8 @@ pub enum Feature {
     /// (`PUT /api/v1/style/public`, read at
     /// `GET /api/v1/accounts/:id/style_public` on Nodus).
     StylePublic,
+    /// Web Push subscription for the browser (`/api/v1/push/subscription`).
+    Push,
 }
 
 impl Feature {
@@ -172,7 +174,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 72;
+    pub const COUNT: usize = 73;
 
     /// Every capability this build names.
     ///
@@ -251,6 +253,7 @@ impl Feature {
         Self::NotificationSettings,
         Self::Pages,
         Self::StylePublic,
+        Self::Push,
     ];
 }
 

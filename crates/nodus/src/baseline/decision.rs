@@ -177,5 +177,13 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         // Neither upstream protocol publishes a profile's banner arrangement, so this
         // surface exists only where the published list says it does.
         Feature::StylePublic => [false, false, false],
+        // Mastodon: `401 POST /api/v1/push/subscription` — the route exists and only
+        // auth is missing. Misskey: `400 POST /api/sw/register` (ACCESS_DENIED, so the
+        // route ran) and `400 POST /api/sw/unregister` (INVALID_PARAM: endpoint), and
+        // `POST /api/endpoints` also lists `sw/show-registration` and
+        // `sw/update-registration` — the browser's subscription store, under Misskey's
+        // `sw/*` rather than Mastodon's path. Nodus publishes `push`, so its answer
+        // comes from the published list, never this baseline.
+        Feature::Push => [false, true, true],
     }
 }

@@ -79,6 +79,7 @@ impl Feature {
             Self::NotificationSettings => "notification_settings",
             Self::Pages => "pages",
             Self::StylePublic => "style_public",
+            Self::Push => "push",
         }
     }
 

@@ -154,6 +154,7 @@ mod tests {
         (Feature::NotificationSettings, false, true, false),
         (Feature::Pages, false, false, false),
         (Feature::StylePublic, false, false, false),
+        (Feature::Push, false, true, true),
     ];
 
     #[test]

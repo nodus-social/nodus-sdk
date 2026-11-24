@@ -84,6 +84,7 @@ impl Feature {
             Self::NotificationSettings => 69,
             Self::Pages => 70,
             Self::StylePublic => 71,
+            Self::Push => 72,
         }
     }
 }
