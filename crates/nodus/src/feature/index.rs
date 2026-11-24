@@ -85,6 +85,7 @@ impl Feature {
             Self::Pages => 70,
             Self::StylePublic => 71,
             Self::Push => 72,
+            Self::MediaLibrary => 73,
         }
     }
 }

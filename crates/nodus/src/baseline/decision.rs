@@ -185,5 +185,10 @@ pub(super) const fn decision(feature: Feature) -> [bool; 3] {
         // `sw/*` rather than Mastodon's path. Nodus publishes `push`, so its answer
         // comes from the published list, never this baseline.
         Feature::Push => [false, true, true],
+        // Mastodon: `401 GET /api/v1/media/library` — no route, the catch-all auth
+        // handler returns 401 for non-existent API routes. Misskey:
+        // `404 GET /api/v1/media/library` — the path is absent. This is a nodus-only
+        // extension for managing an account's uploaded media.
+        Feature::MediaLibrary => [false, false, false],
     }
 }

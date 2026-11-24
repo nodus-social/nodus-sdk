@@ -167,6 +167,8 @@ pub enum Feature {
     StylePublic,
     /// Web Push subscription for the browser (`/api/v1/push/subscription`).
     Push,
+    /// Media library with usage tracking and safe delete (`/api/v1/media/library` on Nodus).
+    MediaLibrary,
 }
 
 impl Feature {
@@ -174,7 +176,7 @@ impl Feature {
     ///
     /// Stated separately from [`Feature::ALL`] so the two must agree; the assertion
     /// below turns a forgotten row into a compile error rather than a missing bit.
-    pub const COUNT: usize = 73;
+    pub const COUNT: usize = 74;
 
     /// Every capability this build names.
     ///
@@ -254,6 +256,7 @@ impl Feature {
         Self::Pages,
         Self::StylePublic,
         Self::Push,
+        Self::MediaLibrary,
     ];
 }
 

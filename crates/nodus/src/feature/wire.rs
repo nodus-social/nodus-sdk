@@ -80,6 +80,7 @@ impl Feature {
             Self::Pages => "pages",
             Self::StylePublic => "style_public",
             Self::Push => "push",
+            Self::MediaLibrary => "media_library",
         }
     }
 

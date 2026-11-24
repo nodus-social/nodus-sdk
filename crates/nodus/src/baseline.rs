@@ -155,6 +155,7 @@ mod tests {
         (Feature::Pages, false, false, false),
         (Feature::StylePublic, false, false, false),
         (Feature::Push, false, true, true),
+        (Feature::MediaLibrary, false, false, false),
     ];
 
     #[test]

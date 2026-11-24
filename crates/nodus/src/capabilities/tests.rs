@@ -54,6 +54,18 @@ fn push_parses_from_the_published_list_into_its_variant() {
 }
 
 #[test]
+fn media_library_parses_from_the_published_list_into_its_variant() {
+    let capabilities = Capabilities::from_published(&["media_library".to_owned()]);
+    assert_eq!(capabilities.provider, Provider::Nodus);
+    assert!(capabilities.supports(Feature::MediaLibrary));
+    assert_eq!(
+        capabilities.features.iter().collect::<Vec<_>>(),
+        vec![Feature::MediaLibrary]
+    );
+    assert_eq!(capabilities.unknown, Vec::<String>::new());
+}
+
+#[test]
 fn from_published_builds_the_typed_set_and_keeps_an_unknown_extra_name() {
     let names = ["polls".to_owned(), "quantum".to_owned()];
     let capabilities = Capabilities::from_published(&names);
@@ -176,9 +188,9 @@ fn a_nodus_payload_with_every_name_leaves_nothing_unknown() {
         .iter()
         .map(|feature| feature.as_str().to_owned())
         .collect();
-    assert_eq!(names.len(), 73);
+    assert_eq!(names.len(), 74);
     let capabilities = Capabilities::from_published(&names);
-    assert_eq!(capabilities.features.len(), 73);
+    assert_eq!(capabilities.features.len(), 74);
     assert_eq!(capabilities.unknown, Vec::<String>::new());
     assert_eq!(
         capabilities.features,

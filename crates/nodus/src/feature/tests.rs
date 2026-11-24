@@ -116,6 +116,7 @@ fn every_name_in_the_vocabulary_parses() {
         "pages",
         "style_public",
         "push",
+        "media_library",
     ];
     assert_eq!(published.len(), Feature::COUNT);
     for name in published {
@@ -203,6 +204,7 @@ fn the_vocabulary_is_exactly_the_named_list() {
         "pages",
         "style_public",
         "push",
+        "media_library",
     ];
     ours.sort_unstable();
     backend.sort_unstable();
