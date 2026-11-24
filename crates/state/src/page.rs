@@ -193,6 +193,8 @@ mod tests {
             discoverable: None,
             indexable: None,
             noindex: None,
+            moved_to: None,
+            also_known_as: Vec::new(),
             fields: Vec::new(),
         }
     }

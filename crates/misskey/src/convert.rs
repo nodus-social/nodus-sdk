@@ -2,8 +2,8 @@
 
 use nodus_client_core::model::{
     Account, CredentialSource, CustomEmoji, LocalId, MediaAttachment, MediaKind, Mention,
-    Notification, NotificationKind, Poll, PollOption, ProfileField, Relationship, Status, Tag,
-    Visibility,
+    MovedAccount, Notification, NotificationKind, Poll, PollOption, ProfileField, Relationship,
+    Status, Tag, Visibility,
 };
 use serde_json::Value;
 
@@ -68,8 +68,37 @@ pub fn account(value: &Value) -> Option<Account> {
         discoverable: value.get("isExplorable").and_then(Value::as_bool),
         indexable: None,
         noindex: None,
+        moved_to: value
+            .get("movedTo")
+            .and_then(Value::as_str)
+            .map(moved_account),
+        also_known_as: value
+            .get("alsoKnownAs")
+            .and_then(Value::as_array)
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
         fields: profile_fields(value),
     })
+}
+
+/// Misskey sends only the target's account id in `movedTo`; the rest is unknown here.
+/// A caller that needs the profile fetches it by that id. This is deliberately not a
+/// nodus-shaped six-member reference: inventing empty handles would claim knowledge the
+/// answer does not carry.
+fn moved_account(id: &str) -> MovedAccount {
+    MovedAccount {
+        id: id.to_owned(),
+        uri: String::new(),
+        url: String::new(),
+        username: String::new(),
+        acct: String::new(),
+        domain: String::new(),
+    }
 }
 
 /// Map Misskey's `fields` rows to the shared name/value shape.

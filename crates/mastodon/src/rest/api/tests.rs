@@ -6,14 +6,14 @@ use serde_json::Value;
 
 use crate::actions::{
     AccountActions, AdminActions, Browse, FilterActions, FilterV1Actions, HighlightActions,
-    InstanceMeta, MarkerActions, ScheduleActions, SessionActions, SettingsActions, StatusActions,
-    TagActions,
+    InstanceMeta, MarkerActions, MigrationActions, ScheduleActions, SessionActions,
+    SettingsActions, StatusActions, TagActions,
 };
 use crate::api::InstanceApi;
 use crate::model::{
     Draft, FilterAction, FilterContext, FilterDraft, FilterV1Draft, LocalId, MarkerTimeline,
-    MarkerUpdate, PollDraft, PreferenceRefusal, Preferences, PreferencesPatch, ProfileField,
-    ProfileImage, ProfileUpdate, Visibility,
+    MarkerUpdate, MigrationRefusal, PollDraft, PreferenceRefusal, Preferences, PreferencesPatch,
+    ProfileField, ProfileImage, ProfileUpdate, Visibility,
 };
 use crate::rest::{HttpRequest, HttpResponse, RestInstance, Transport};
 use crate::{Error, Instance, Result};
@@ -871,5 +871,112 @@ fn sessions_reads_the_list_and_revokes_one_or_a_scope() {
     assert_eq!(
         recorded[3].url,
         "https://mastodon.example/api/v1/auth/sessions?scope=all"
+    );
+}
+
+#[test]
+fn move_account_posts_the_handle_and_reads_the_six_member_redirect() {
+    let (instance, requests) = instance_with(vec![ok_json(
+        r#"{
+            "id": "1",
+            "acct": "mover",
+            "moved_to": {
+                "id": "https://mastodon.example/users/heir",
+                "uri": "https://mastodon.example/users/heir",
+                "url": "https://mastodon.example/users/heir",
+                "username": "heir",
+                "acct": "heir@remote.test",
+                "domain": "remote.test"
+            }
+        }"#,
+    )]);
+
+    let account = block_on(instance.move_account("heir@remote.test")).expect("move");
+    let moved = account.moved_to.expect("redirect present");
+    assert_eq!(moved.id, "https://mastodon.example/users/heir");
+    assert_eq!(moved.acct, "heir@remote.test");
+
+    let sent = requests.borrow();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].method, "POST");
+    assert_eq!(sent[0].url, "https://mastodon.example/api/v1/accounts/move");
+    assert_eq!(
+        sent[0].form_pairs(),
+        vec![("acct".to_owned(), "heir@remote.test".to_owned())]
+    );
+}
+
+#[test]
+fn move_refusals_arrive_as_printable_migration_errors() {
+    let cases = [
+        (
+            "The target account has not listed you in also_known_as, so it has not agreed to this move",
+            MigrationRefusal::TargetDidNotConsent,
+        ),
+        (
+            "This instance does not know that account",
+            MigrationRefusal::UnknownAccount,
+        ),
+    ];
+    for (sentence, expected) in cases {
+        let body = serde_json::json!({ "error": sentence }).to_string();
+        let (instance, _) = instance_with(vec![HttpResponse {
+            status: 422,
+            retry_after_s: None,
+            body: body.into_bytes(),
+        }]);
+
+        let error = block_on(instance.move_account("heir@remote.test"))
+            .expect_err("the server refused the move");
+        assert_eq!(
+            error.to_string(),
+            format!("account migration refused: {expected}")
+        );
+        assert!(matches!(
+            error,
+            Error::MigrationRefused(refusal) if refusal == expected
+        ));
+    }
+}
+
+#[test]
+fn aliases_read_add_and_remove_use_the_accounts_aliases_route() {
+    let (instance, requests) = instance_with(vec![
+        ok_json(r#"[{"id":"https://mastodon.example/users/heir","accounts":[]}]"#),
+        ok_json(r#"{"id":"9","accounts":[{"id":"9","acct":"heir@remote.test"}]}"#),
+        ok_empty(204),
+    ]);
+
+    let listed = block_on(instance.aliases()).expect("aliases");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "https://mastodon.example/users/heir");
+    assert_eq!(listed[0].accounts, []);
+
+    let added = block_on(instance.add_alias("heir@remote.test")).expect("add");
+    assert_eq!(added.id, "9");
+    assert_eq!(added.accounts[0].acct, "heir@remote.test");
+
+    block_on(instance.remove_alias("9")).expect("remove");
+
+    let sent = requests.borrow();
+    assert_eq!(sent.len(), 3);
+    assert_eq!(sent[0].method, "GET");
+    assert_eq!(
+        sent[0].url,
+        "https://mastodon.example/api/v1/accounts/aliases"
+    );
+    assert_eq!(sent[1].method, "POST");
+    assert_eq!(
+        sent[1].url,
+        "https://mastodon.example/api/v1/accounts/aliases"
+    );
+    assert_eq!(
+        sent[1].form_pairs(),
+        vec![("acct".to_owned(), "heir@remote.test".to_owned())]
+    );
+    assert_eq!(sent[2].method, "DELETE");
+    assert_eq!(
+        sent[2].url,
+        "https://mastodon.example/api/v1/accounts/aliases/9"
     );
 }

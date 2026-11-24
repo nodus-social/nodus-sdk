@@ -7,6 +7,7 @@ mod filters_v1;
 mod highlights;
 mod markers;
 mod meta;
+mod migration;
 mod registration;
 mod schedule;
 mod sessions;

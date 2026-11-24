@@ -15,14 +15,15 @@
 )]
 
 pub mod convert;
+mod migration;
 pub mod note_actions;
 
 use core::fmt;
 
 use nodus_client_core::model::{
     Account, Announcement, Context, Conversation, CredentialAccount, Draft, FeaturedTag, Filter,
-    List, LocalId, MarkerTimeline, Markers, Notification, Page, PageParams, Preferences,
-    PreferencesPatch, Relationship, SearchResults, Status, StreamKind, Tag,
+    List, LocalId, MarkerTimeline, Markers, MigrationRefusal, Notification, Page, PageParams,
+    Preferences, PreferencesPatch, Relationship, SearchResults, Status, StreamKind, Tag,
 };
 use nodus_client_core::rest::{HttpRequest, HttpResponse, Method, Transport};
 use nodus_client_core::{Error, Instance, Result};
@@ -94,6 +95,22 @@ impl<T: Transport> MisskeyInstance<T> {
     }
 
     fn finish(&self, response: HttpResponse) -> Result<Value> {
+        if !(200..=299).contains(&response.status) {
+            let code = serde_json::from_slice::<Value>(&response.body)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .pointer("/error/code")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                });
+            if let Some(refusal) = code
+                .as_deref()
+                .and_then(MigrationRefusal::parse_misskey_code)
+            {
+                return Err(Error::MigrationRefused(refusal));
+            }
+        }
         match response.status {
             200..=299 => serde_json::from_slice(&response.body)
                 .map_err(|error| Error::Decode(error.to_string())),
@@ -598,7 +615,10 @@ mod tests {
     use std::rc::Rc;
 
     use nodus_client_core::InstanceApi;
-    use nodus_client_core::model::{Draft, LocalId, PageParams, PollDraft, StreamKind, Visibility};
+    use nodus_client_core::actions::MigrationActions;
+    use nodus_client_core::model::{
+        Draft, LocalId, MigrationRefusal, PageParams, PollDraft, StreamKind, Visibility,
+    };
 
     use super::*;
 
@@ -837,5 +857,106 @@ mod tests {
             Error::Unsupported(reason) if reason.contains("i/registry")
         ));
         assert!(requests.borrow().is_empty());
+    }
+
+    #[test]
+    fn move_posts_the_target_and_reads_the_bare_redirect() {
+        let (client, requests) = instance_with(vec![
+            ok_json(&json!({})),
+            ok_json(&json!({
+                "id": "u1",
+                "username": "mover",
+                "movedTo": "u2"
+            })),
+        ]);
+
+        let account = block_on(client.move_account("heir@remote.test")).expect("move");
+        assert_eq!(account.moved_to.expect("redirect").id, "u2");
+
+        let sent = requests.borrow();
+        assert_eq!(sent.len(), 2);
+        assert_eq!(sent[0].url, "https://misskey.example/api/i/move");
+        assert_eq!(sent[0].body["moveToAccount"], json!("heir@remote.test"));
+        assert_eq!(sent[1].url, "https://misskey.example/api/i");
+    }
+
+    #[test]
+    fn a_consent_refusal_is_typed_by_its_misskey_code() {
+        let body = serde_json::json!({
+            "error": {
+                "code": "DESTINATION_ACCOUNT_FORBIDS",
+                "message": "Destination account doesn't have proper 'Known As' alias, or has already moved."
+            }
+        })
+        .to_string();
+        let (client, requests) = instance_with(vec![HttpResponse {
+            status: 400,
+            retry_after_s: None,
+            body: body.into_bytes(),
+        }]);
+
+        let error = block_on(client.move_account("heir@remote.test"))
+            .expect_err("the target did not consent");
+        assert!(matches!(
+            error,
+            Error::MigrationRefused(MigrationRefusal::TargetDidNotConsent)
+        ));
+        assert_eq!(requests.borrow().len(), 1);
+    }
+
+    #[test]
+    fn aliases_resolve_each_published_id_through_users_show() {
+        let (client, requests) = instance_with(vec![
+            ok_json(&json!({ "id": "u1", "username": "me", "alsoKnownAs": ["u2"] })),
+            ok_json(&json!({ "id": "u2", "username": "heir", "host": "remote.test" })),
+        ]);
+
+        let aliases = block_on(client.aliases()).expect("aliases");
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(aliases[0].id, "u2");
+        assert_eq!(aliases[0].accounts[0].acct, "heir@remote.test");
+
+        let sent = requests.borrow();
+        assert_eq!(sent[0].url, "https://misskey.example/api/i");
+        assert_eq!(sent[1].url, "https://misskey.example/api/users/show");
+        assert_eq!(sent[1].body["userId"], json!("u2"));
+    }
+
+    #[test]
+    fn adding_an_alias_rewrites_the_whole_list_as_handles() {
+        let (client, requests) = instance_with(vec![
+            ok_json(&json!({ "id": "u1", "username": "me", "alsoKnownAs": ["u2"] })),
+            ok_json(&json!({ "id": "u3", "username": "heir", "host": "remote.test" })),
+            ok_json(&json!({ "id": "u2", "username": "old", "host": "remote.test" })),
+            ok_json(&json!({ "id": "u1", "username": "me" })),
+        ]);
+
+        let alias = block_on(client.add_alias("heir@remote.test")).expect("add");
+        assert_eq!(alias.id, "u3");
+        assert_eq!(alias.accounts[0].acct, "heir@remote.test");
+
+        let sent = requests.borrow();
+        assert_eq!(sent.len(), 4);
+        assert_eq!(sent[1].body["username"], json!("heir"));
+        assert_eq!(sent[1].body["host"], json!("remote.test"));
+        assert_eq!(sent[3].url, "https://misskey.example/api/i/update");
+        assert_eq!(
+            sent[3].body["alsoKnownAs"],
+            json!(["old@remote.test", "heir@remote.test"])
+        );
+    }
+
+    #[test]
+    fn removing_a_missing_alias_never_rewrites_the_list() {
+        let (client, requests) = instance_with(vec![ok_json(
+            &json!({ "id": "u1", "username": "me", "alsoKnownAs": ["u2"] }),
+        )]);
+
+        let error = block_on(client.remove_alias("u9")).expect_err("not listed");
+        assert!(matches!(
+            error,
+            Error::MigrationRefused(MigrationRefusal::AliasNotFound)
+        ));
+        assert_eq!(requests.borrow().len(), 1);
     }
 }

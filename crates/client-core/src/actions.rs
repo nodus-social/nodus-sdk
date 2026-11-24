@@ -21,9 +21,9 @@ use core::fmt::Debug;
 use core::future::Future;
 
 use crate::model::{
-    Account, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert, AdminMeasure,
-    AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload, AuditEntry,
-    AuditFilter, AuthSession, Conversation, CustomEmoji, DomainAllow, DomainBlock,
+    Account, AccountAlias, AccountDetail, AccountNote, AdminAccount, AdminAccountQuery, AdminAlert,
+    AdminMeasure, AdminMeta, AdminOverview, Announcement, AnnouncementDraft, AssetUpload,
+    AuditEntry, AuditFilter, AuthSession, Conversation, CustomEmoji, DomainAllow, DomainBlock,
     DomainBlockDraft, DomainImportOutcome, DomainSeverity, Draft, EmailDomainBlock, FeaturedTag,
     Filter, FilterDraft, FilterV1, FilterV1Draft, FlagState, HistoryEntry, InstanceInfo, Language,
     List, LocalId, MarkerTimeline, MarkerUpdate, Markers, MediaAttachment, ModerationAction,
@@ -197,6 +197,40 @@ pub trait AccountActions {
         &self,
         update: &crate::model::ProfileUpdate,
     ) -> impl Future<Output = Result<Account, Self::Error>>;
+}
+
+/// Moving an account, and the aliases that permit the move.
+///
+/// A move is a redirect, not a deletion: the old profile keeps answering, now with
+/// [`Account::moved_to`], so a follower can choose to follow the new account. The target
+/// must already name the mover in its aliases; the server checks that consent.
+///
+/// The trait is separate from [`AccountActions`] because a transport can read and edit
+/// profiles without having a migration surface. A refusal the server explains in a
+/// sentence or a stable code is [`crate::Error::MigrationRefused`], not a bare status
+/// code.
+pub trait MigrationActions {
+    /// Error type of the transport.
+    type Error: Debug;
+
+    /// Points this profile at another account, answering the account with its redirect.
+    ///
+    /// `acct` is a handle (`user@host`), or an actor URI where the API resolves one.
+    /// The move is refused unless the target already lists this account in its aliases;
+    /// that refusal is [`crate::Error::MigrationRefused`].
+    fn move_account(&self, acct: &str) -> impl Future<Output = Result<Account, Self::Error>>;
+
+    /// The aliases this profile publishes.
+    ///
+    /// Each entry carries the target's account document; `accounts` is empty when this
+    /// instance has no row for the alias yet, and `id` is then the actor URI.
+    fn aliases(&self) -> impl Future<Output = Result<Vec<AccountAlias>, Self::Error>>;
+
+    /// Adds an account to this profile's alias list, answering the new alias.
+    fn add_alias(&self, acct: &str) -> impl Future<Output = Result<AccountAlias, Self::Error>>;
+
+    /// Removes one alias by account id, or by actor URI for an unresolved alias.
+    fn remove_alias(&self, id: &str) -> impl Future<Output = Result<(), Self::Error>>;
 }
 
 /// Reading positions, one per timeline.

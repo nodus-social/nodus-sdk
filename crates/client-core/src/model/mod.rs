@@ -13,6 +13,7 @@ mod highlights;
 mod instance;
 mod interaction;
 mod markers;
+mod migration;
 mod preferences;
 mod schedule;
 mod settings;
@@ -43,6 +44,7 @@ pub use interaction::{
     ProfileField, ProfileImage, ProfileUpdate, SearchResults, Tag, TagHistory,
 };
 pub use markers::{Marker, MarkerTimeline, MarkerUpdate, Markers};
+pub use migration::{AccountAlias, MigrationRefusal, MovedAccount};
 pub use preferences::{
     ExpandMedia, PreferenceRefusal, Preferences, PreferencesPatch, QuotePolicy,
     UnknownPreferenceValue,
@@ -155,6 +157,23 @@ pub struct Actor {
     /// Deprecated inverse of `indexable`; older instances still send it.
     #[serde(default)]
     pub noindex: Option<bool>,
+    /// The account this profile has moved to, when it has moved.
+    ///
+    /// Nodus publishes the same reference under both `moved` (Mastodon's name) and
+    /// `moved_to` (its store's name). This model reads `moved_to`; the reference is the
+    /// compact [`MovedAccount`] the API builds from the stored move URI, not a second
+    /// full account document. A plain Mastodon instance only sends `moved`, so a profile
+    /// there leaves this `None` until the client is pointed at a nodus server.
+    #[serde(default)]
+    pub moved_to: Option<MovedAccount>,
+    /// The accounts that may move to this one, as account ids.
+    ///
+    /// Nodus's REST account document does not carry this member; the actor document and
+    /// Misskey's detailed user do. Misskey reports account ids here, not handles or
+    /// actor URIs, so the element type records that. An instance that omits the key and
+    /// an account with no aliases both decode to an empty list.
+    #[serde(default, alias = "alsoKnownAs", skip_serializing_if = "Vec::is_empty")]
+    pub also_known_as: Vec<String>,
     /// The profile's metadata rows, as the instance returns them.
     ///
     /// Both `verify_credentials` and a profile update answer with these rows, and a

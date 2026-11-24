@@ -54,6 +54,9 @@ pub enum Error {
     /// The server refused a preferences write, naming the key and allowed values.
     #[error("preference update refused: {0}")]
     PreferenceRefused(PreferenceRefusal),
+    /// The server refused a move or an alias write, with a sentence a UI can print.
+    #[error("account migration refused: {0}")]
+    MigrationRefused(MigrationRefusal),
     /// The capability model predicted this server cannot serve `verb`, and the
     /// server confirmed it with 404 or 501.
     ///
